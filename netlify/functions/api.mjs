@@ -1,8 +1,8 @@
 import { getStore } from "@netlify/blobs";
 
-// Eén API voor de website (en later de tablet-app):
+// API voor de website:
 //   /api/closures   sluitingsperiodes
-//   /api/vacc       vaccinatieagenda (data + beschikbaarheid)
+// (De vaccinatieagenda komt van de tablet-app: apotheekformulier.netlify.app)
 // Schrijven vereist de header  X-Beheer-Code.
 
 const STORE = "vansuyt";
@@ -26,24 +26,6 @@ const cleanClosures = (list) =>
     .sort((a, b) => (a.from < b.from ? -1 : 1))
     .slice(0, 60);
 
-const TYPES = ["covid", "griep"];
-const cleanVacc = (obj) => {
-  const out = {};
-  for (const id of TYPES) {
-    const slots = obj && obj[id] && Array.isArray(obj[id].slots) ? obj[id].slots : null;
-    if (!slots) continue;
-    out[id] = {
-      slots: slots.slice(0, 40).map((s, i) => ({
-        id: str(s.id || `${id}-${i}`, 40),
-        date: str(s.date, 80),
-        time: str(s.time, 60),
-        status: ["vrij", "beperkt", "volzet"].includes(s.status) ? s.status : "vrij",
-      })),
-    };
-  }
-  return out;
-};
-
 export default async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true });
   const path = new URL(req.url).pathname.replace(/\/+$/, "");
@@ -61,19 +43,7 @@ export default async (req) => {
     return json({ error: "method not allowed" }, 405);
   }
 
-  if (path.endsWith("/api/vacc")) {
-    if (req.method === "GET") return json({ vacc: cleanVacc((await store.get("vacc", { type: "json" })) || {}) });
-    if (req.method === "PUT" || req.method === "POST") {
-      if (!auth(req)) return json({ error: "unauthorized" }, 401);
-      const body = await readBody(req); if (!body) return json({ error: "bad json" }, 400);
-      const v = cleanVacc(body.vacc);
-      await store.setJSON("vacc", v);
-      return json({ ok: true, vacc: v });
-    }
-    return json({ error: "method not allowed" }, 405);
-  }
-
   return json({ error: "not found" }, 404);
 };
 
-export const config = { path: ["/api/closures", "/api/vacc"] };
+export const config = { path: ["/api/closures"] };

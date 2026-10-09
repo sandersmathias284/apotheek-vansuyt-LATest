@@ -24,8 +24,8 @@ Online zetten
 Beheer
 ------
   <uw-site>/#beheer     code: vansuyt29
-  Hier beheert u zowel de vakantieperiodes als de Covid- en griepagenda.
-  Beide worden centraal bewaard (API: /api/closures en /api/vacc).
+  Hier beheert u de vakantieperiodes (centraal bewaard via /api/closures).
+  De vaccinatieagenda staat er ter controle, maar wordt op de tablet beheerd.
 
 Wijzigt u de code, dan moet ze op twee plaatsen gelijk zijn:
   - in index.html (zoek op BEHEER_PIN)
