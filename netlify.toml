@@ -1,3 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
@@ -8,11 +15,17 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 [[headers]]
-  for = "/*.html"
+  for = "/*"
   [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
 
 [[headers]]
   for = "/api/*"
   [headers.values]
     Cache-Control = "no-store"
+
+[[headers]]
+  for = "/beheer/*"
+  [headers.values]
+    X-Robots-Tag = "noindex"
