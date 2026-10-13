@@ -87,7 +87,8 @@ const bewaarFoto = async (store, id, foto) => {
 export default async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true });
   const path = new URL(req.url).pathname.replace(/\/+$/, "");
-  const store = getStore(STORE);
+  // "strong": wat net bewaard is, is meteen zichtbaar (standaard kan dat tot een minuut duren).
+  const store = getStore({ name: STORE, consistency: "strong" });
 
   if (path.endsWith("/api/login")) {
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
