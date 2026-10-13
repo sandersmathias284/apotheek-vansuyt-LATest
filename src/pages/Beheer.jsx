@@ -348,6 +348,9 @@ const BeheerBerichten = () => {
             Berichten uit de posting-app verschijnen hier vanzelf. U kan hier ook zelf een bericht plaatsen of er een weghalen. Zonder berichten toont de website geen nieuwsblok.
           </p>
         </div>
+        <div className="bh-top-actions">
+          <a className="btn btn-primary" href="https://post-maken.netlify.app" target="_blank" rel="noreferrer">Post maken openen<span className="arr" aria-hidden="true"></span></a>
+        </div>
       </div>
       {msg.text ? <div className={`bh-sync ${msg.state}`} role="status" aria-live="polite">{msg.text}</div> : null}
       <div className="bh-grid">
