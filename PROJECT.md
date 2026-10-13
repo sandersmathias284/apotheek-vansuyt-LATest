@@ -18,7 +18,7 @@ Lettertypen: Source Serif 4 (serif, cursieve accenten) + Geist (sans) + Geist Mo
 
 **Openingsuren** (Chrome.jsx `HOURS`): ma/di/do/vr 8:30–12:00 & 14:00–19:00, wo en za 8:30–12:00, zo gesloten. Header toont live open/gesloten.
 
-**Sluitingsperiodes / vakantie** — `/beheer/`. De code wordt enkel op de server gecontroleerd (`/api/login`): env-variabele `BEHEER_CODE` op Netlify, anders de oude code als terugval. Periodes worden centraal bewaard via `/api/closures` (Netlify Blobs) en zijn wereldwijd zichtbaar. Tijdens een periode: rode balk op elke pagina, aftelklok op de onthaalpagina, link naar de officiële wachtdienst. Periodes binnen 30 dagen worden vooraf aangekondigd. localStorage dient enkel als cache.
+**Sluitingsperiodes / vakantie** — `/beheer/`. De code wordt enkel op de server gecontroleerd (`/api/login`): env-variabele `BEHEER_CODE` op Netlify, zonder die variabele kan niemand bewaren. De app "Post maken" gebruikt dezelfde waarde als `WEBSITE_CODE`. Periodes worden centraal bewaard via `/api/closures` (Netlify Blobs) en zijn wereldwijd zichtbaar. Tijdens een periode: rode balk op elke pagina, aftelklok op de onthaalpagina, link naar de officiële wachtdienst. Periodes binnen 30 dagen worden vooraf aangekondigd. localStorage dient enkel als cache.
 
 **Vaccinatieagenda** (Catalog.jsx): de site bewaart zelf niets meer. Data komen van de tablet-app van de eigenaar via `VACC_API` / `fetchVacc`; de site toont ze alleen. "Plaats reserveren" opent de externe boekingspagina:
 - Covid → https://apotheekformulier.netlify.app/boeken.html?vaccin=covid

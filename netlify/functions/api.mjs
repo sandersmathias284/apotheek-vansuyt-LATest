@@ -15,7 +15,8 @@ import { timingSafeEqual, randomUUID } from "node:crypto";
 // Zet de code op Netlify: Site configuration > Environment variables > BEHEER_CODE.
 
 const STORE = "vansuyt";
-const CODE = process.env.BEHEER_CODE || "vansuyt29";
+// Geen code ingesteld = niemand mag schrijven.
+const CODE = process.env.BEHEER_CODE || "";
 const MAX_FOTO = 4 * 1024 * 1024; // 4 MB na decoderen
 const MAX_BERICHTEN = 50;
 
@@ -28,6 +29,7 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS } });
 const str = (v, n) => String(v ?? "").trim().slice(0, n);
 const auth = (req) => {
+  if (!CODE) return false;
   const given = Buffer.from(req.headers.get("x-beheer-code") || "");
   const want = Buffer.from(CODE);
   return given.length === want.length && timingSafeEqual(given, want);

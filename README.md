@@ -40,8 +40,10 @@ Lokaal bouwen: `npm install` en daarna `npm run build`.
 
 ## Instellingen op Netlify
 
-- **BEHEER_CODE** (Site configuration → Environment variables): de code voor
-  `/beheer/`. Zolang die niet ingesteld is, geldt de oude code.
+- **BEHEER_CODE** (Site configuration → Environment variables, als secret):
+  de code voor `/beheer/` en voor de app "Post maken". Zonder deze variabele
+  kan niemand iets bewaren. De app "Post maken" (Netlify-site `post-maken`)
+  heeft dezelfde waarde nodig in **WEBSITE_CODE**.
 - **Forms**: zet *form detection* aan (Forms → Enable). Stel onder
   Forms → bestelling → Notifications een e-mailmelding in, anders komen
   bestellingen enkel in het Netlify-dashboard terecht.
