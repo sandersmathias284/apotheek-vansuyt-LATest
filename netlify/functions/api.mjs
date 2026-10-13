@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import { timingSafeEqual, randomUUID } from "node:crypto";
+import { timingSafeEqual, randomUUID, createHash } from "node:crypto";
 
 // API voor de website:
 //   GET  /api/closures                 sluitingsperiodes
@@ -34,6 +34,36 @@ const auth = (req) => {
   const want = Buffer.from(CODE);
   return given.length === want.length && timingSafeEqual(given, want);
 };
+// ---------- Te veel foute pogingen ----------
+// Na 3 foute codes is dat IP-adres 15 minuten geblokkeerd. Een juiste code zet de teller op nul.
+const MAX_FOUTEN = 3;
+const BLOKKEER_MS = 15 * 60 * 1000;
+const ipVan = (req, context) =>
+  context?.ip || req.headers.get("x-nf-client-connection-ip") || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "onbekend";
+const slotSleutel = (ip) => "slot/" + createHash("sha256").update(ip).digest("hex").slice(0, 32);
+const minutenTot = (t) => Math.max(1, Math.ceil((t - Date.now()) / 60000));
+const geblokkeerd = (tot) =>
+  json({ error: "te veel pogingen", melding: `Te veel foute pogingen. Probeer het opnieuw over ${minutenTot(tot)} minuten.`, wacht: minutenTot(tot) }, 429);
+
+// Geeft null als de code juist is, anders het antwoord (401 of 429) dat terug moet.
+const bewaak = async (req, context, store) => {
+  const sleutel = slotSleutel(ipVan(req, context));
+  const s = (await store.get(sleutel, { type: "json" })) || { fouten: 0, tot: 0 };
+  if (s.tot > Date.now()) return geblokkeerd(s.tot);
+  if (auth(req)) {
+    if (s.fouten || s.tot) await store.delete(sleutel);
+    return null;
+  }
+  const fouten = (s.tot ? 0 : s.fouten) + 1;
+  if (fouten >= MAX_FOUTEN) {
+    const tot = Date.now() + BLOKKEER_MS;
+    await store.setJSON(sleutel, { fouten: 0, tot });
+    return geblokkeerd(tot);
+  }
+  await store.setJSON(sleutel, { fouten, tot: 0 });
+  return json({ error: "unauthorized", melding: `Onjuiste code. Nog ${MAX_FOUTEN - fouten} ${MAX_FOUTEN - fouten === 1 ? "poging" : "pogingen"}.` }, 401);
+};
+
 const readBody = async (req) => { try { return await req.json(); } catch { return null; } };
 const isUrl = (u) => typeof u === "string" && /^https:\/\/[^\s"<>]+$/.test(u) && u.length <= 1000;
 const isDate = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v));
@@ -84,7 +114,7 @@ const bewaarFoto = async (store, id, foto) => {
   return { url: `/api/berichten/foto/${id}` };
 };
 
-export default async (req) => {
+export default async (req, context) => {
   if (req.method === "OPTIONS") return json({ ok: true });
   const path = new URL(req.url).pathname.replace(/\/+$/, "");
   // "strong": wat net bewaard is, is meteen zichtbaar (standaard kan dat tot een minuut duren).
@@ -92,13 +122,13 @@ export default async (req) => {
 
   if (path.endsWith("/api/login")) {
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-    return auth(req) ? json({ ok: true }) : json({ error: "unauthorized" }, 401);
+    return (await bewaak(req, context, store)) || json({ ok: true });
   }
 
   if (path.endsWith("/api/closures")) {
     if (req.method === "GET") return json({ closures: cleanClosures((await store.get("closures", { type: "json" })) || []) });
     if (req.method === "PUT" || req.method === "POST") {
-      if (!auth(req)) return json({ error: "unauthorized" }, 401);
+      const nee = await bewaak(req, context, store); if (nee) return nee;
       const body = await readBody(req); if (!body) return json({ error: "bad json" }, 400);
       const list = cleanClosures(body.closures);
       await store.setJSON("closures", list);
@@ -119,7 +149,7 @@ export default async (req) => {
   const enkel = /\/api\/berichten\/([A-Za-z0-9-]{1,60})$/.exec(path);
   if (enkel) {
     if (req.method !== "DELETE") return json({ error: "method not allowed" }, 405);
-    if (!auth(req)) return json({ error: "unauthorized" }, 401);
+    const nee = await bewaak(req, context, store); if (nee) return nee;
     const list = (await store.get("berichten", { type: "json" })) || [];
     const next = list.filter((b) => b.id !== enkel[1]);
     if (next.length === list.length) return json({ error: "not found" }, 404);
@@ -131,11 +161,11 @@ export default async (req) => {
   if (path.endsWith("/api/berichten")) {
     const list = (await store.get("berichten", { type: "json" })) || [];
     if (req.method === "GET") {
-      const alles = new URL(req.url).searchParams.get("alles") === "1" && auth(req);
+      const alles = new URL(req.url).searchParams.get("alles") === "1" && req.headers.has("x-beheer-code") && !(await bewaak(req, context, store));
       return json({ berichten: alles ? zichtbaar(list, 0) : zichtbaar(list).slice(0, 10) });
     }
     if (req.method === "POST") {
-      if (!auth(req)) return json({ error: "unauthorized" }, 401);
+      const nee = await bewaak(req, context, store); if (nee) return nee;
       const body = await readBody(req); if (!body) return json({ error: "bad json" }, 400);
       if (!str(body.tekst, 3000) && !str(body.titel, 140)) return json({ error: "tekst of titel is verplicht" }, 400);
       const id = randomUUID();

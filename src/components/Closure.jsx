@@ -55,7 +55,10 @@ const pushClosures = async (list, code) => {
       headers: { "Content-Type": "application/json", "X-Beheer-Code": code || "" },
       body: JSON.stringify({ closures: sorted }),
     });
-    if (res.status === 401) return { ok: false, error: "De beheercode werd geweigerd door de server." };
+    if (res.status === 401 || res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, error: data.melding || "De beheercode werd geweigerd door de server." };
+    }
     if (!res.ok) throw new Error(res.status);
     remoteOk = true;
     return { ok: true };
@@ -261,7 +264,10 @@ const checkCode = async (code) => {
   try {
     const res = await fetch("/api/login", { method: "POST", headers: { "X-Beheer-Code": code || "" } });
     if (res.ok) return { ok: true };
-    if (res.status === 401) return { ok: false, error: "Onjuiste code. Probeer opnieuw." };
+    if (res.status === 401 || res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, error: data.melding || "Onjuiste code. Probeer opnieuw." };
+    }
     throw new Error(res.status);
   } catch (e) {
     return { ok: false, error: "Geen verbinding met de server. Probeer het later opnieuw." };

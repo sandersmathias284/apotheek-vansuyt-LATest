@@ -315,7 +315,7 @@ const BeheerBerichten = () => {
     try {
       const res = await fetch(NIEUWS_API, { method: "POST", headers: { "Content-Type": "application/json", "X-Beheer-Code": code() }, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || res.status);
+      if (!res.ok) throw new Error(data.melding || data.error || res.status);
       setDraft(leegBericht());
       formEl.reset();
       setMsg({ state: "ok", text: "Bericht geplaatst — het staat nu op de onthaalpagina." });
