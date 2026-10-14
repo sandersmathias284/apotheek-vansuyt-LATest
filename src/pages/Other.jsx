@@ -409,7 +409,7 @@ const InfoPage = () => (
 
           <aside className="callout">
             <span className="mono">Buiten openingsuren</span>
-            <h3>Wachtdienst &amp; spoed</h3>
+            <h2>Wachtdienst &amp; spoed</h2>
             <p>Zoek de apotheek van wacht via <a className="inline" href="https://www.apotheek.be/pharmacysearch" target="_blank" rel="noreferrer">apotheek.be</a> of bel <a className="inline" href="tel:090399000">0903 99 000</a>. Huisarts van wacht: <a className="inline" href="tel:1733">1733</a>. Bij levensgevaar: <a className="inline" href="tel:112">112</a>. De code voor farmaceutische plichtenleer kan u nalezen bij de <a className="inline" href="https://www.ordredespharmaciens.be/nl" target="_blank" rel="noreferrer">Belgische Orde van Apothekers</a>.</p>
           </aside>
         </div>

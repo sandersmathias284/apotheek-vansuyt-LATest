@@ -5,7 +5,7 @@ export const ROUTES = {
   home: {
     path: "/",
     title: "Apotheek Vansuyt — buurtapotheek in Pervijze",
-    description: "Buurtapotheek in Pervijze (Diksmuide). Voorschriften klaargemaakt terwijl u wacht, thuislevering in Veurne, Diksmuide en Nieuwpoort. Nieuwpoortstraat 29 — 051 55 52 64.",
+    description: "Buurtapotheek in Pervijze (Diksmuide). Voorschriften klaargemaakt terwijl u wacht, thuislevering in Veurne, Diksmuide en Nieuwpoort. Bel 051 55 52 64.",
   },
   diensten: {
     path: "/diensten/",
