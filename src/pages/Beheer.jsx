@@ -85,13 +85,17 @@ const BeheerPanel = ({ setPage, onLock }) => {
   const say = (msg) => { setFlash(msg); setTimeout(() => setFlash(""), 2600); };
 
   // Bewaart centraal via de Netlify-functie
-  const commit = async (next, okMsg) => {
+  // Herinnering voor de telefoon (Voys) na het bewaren van een periode.
+  const [voysHerinnering, setVoysHerinnering] = React.useState(null);
+
+  const commit = async (next, okMsg, periode) => {
     setList(writeClosures(next));
     setSync({ state: "busy", msg: "Centraal bewaren…" });
     const res = await pushClosures(next, sessionStorage.getItem(CODE_KEY) || "");
     if (res.ok) {
       setSync({ state: "ok", msg: "Centraal bewaard — zichtbaar voor alle bezoekers." });
       say(okMsg);
+      setVoysHerinnering({ periode: periode || null });
     } else {
       setSync({ state: "err", msg: res.error });
     }
@@ -116,7 +120,7 @@ const BeheerPanel = ({ setPage, onLock }) => {
     const wasEdit = !!draft.id;
     setDraft(emptyDraft());
     setEditing(false);
-    commit(next, wasEdit ? "Periode aangepast." : "Periode toegevoegd.");
+    commit(next, wasEdit ? "Periode aangepast." : "Periode toegevoegd.", { ...draft, id });
   };
 
   const edit = (c) => { setDraft({ ...c }); setEditing(true); window.scrollTo({ top: 0, behavior: "smooth" }); };
@@ -160,6 +164,8 @@ const BeheerPanel = ({ setPage, onLock }) => {
         {sync.msg ? (
           <div className={`bh-sync ${sync.state}`} role="status" aria-live="polite">{sync.msg}</div>
         ) : null}
+
+        {voysHerinnering ? <VoysHerinnering {...voysHerinnering} onSluit={() => setVoysHerinnering(null)} /> : null}
 
         <p className={`bh-state ${active ? "on" : ""}`} role="status">
           <span className="bh-state-dot" aria-hidden="true"></span>
@@ -260,6 +266,28 @@ const BeheerPanel = ({ setPage, onLock }) => {
     </div>
   );
 };
+
+// ---------- Telefoon (Voys) ----------
+// De telefoon staat los van de website: na elke bewaarde periode een herinnering.
+const VOYS_URL = "https://www.voys.be/";
+
+const VoysHerinnering = ({ periode, onSluit }) => (
+  <aside className="voys-herinnering" role="status" aria-live="polite">
+    <div>
+      <span className="mono">Telefoon · Voys</span>
+      <h3>Vergeet de telefoon niet</h3>
+      <p>
+        {periode
+          ? <>Stel in Voys ook de sluiting in van <strong>{fmtDate(periode.from)}</strong> tot en met <strong>{fmtDate(periode.to)}</strong>, zodat bellers de juiste melding horen.</>
+          : <>Pas in Voys ook de sluiting aan, zodat bellers de juiste melding horen.</>}
+      </p>
+    </div>
+    <div className="voys-acties">
+      <a className="btn btn-primary" href={VOYS_URL} target="_blank" rel="noreferrer">Naar Voys<span className="arr" aria-hidden="true"></span></a>
+      <button type="button" className="bh-lock" onClick={onSluit}>Gedaan</button>
+    </div>
+  </aside>
+);
 
 // ---------- Berichten (nieuws op de onthaalpagina) ----------
 const leegBericht = () => ({ titel: "", tekst: "", knopLabel: "", knopUrl: "", facebookUrl: "", vastgezet: false, verloopt: "", foto: "", fotoNaam: "" });

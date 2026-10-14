@@ -1791,3 +1791,11 @@ html.js noscript{display:none !important}
   .brand { padding-top: 8px; padding-bottom: 8px; }
   .callout a, .drawer-foot a, .breadcrumb a, dd a { display: inline-block; padding-top: 11px; padding-bottom: 11px; }
 }
+
+/* Beheer: herinnering telefoon (Voys) */
+.voys-herinnering { border: 1px solid var(--red); background: #FDF4F4; border-radius: var(--radius); padding: 20px 22px; display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin: 0 0 16px; }
+.voys-herinnering > div:first-child { flex: 1 1 320px; min-width: 0; }
+.voys-herinnering .mono { display: block; margin-bottom: 6px; }
+.voys-herinnering h3 { font-family: var(--serif); font-weight: 400; font-size: 22px; line-height: 1.2; margin: 0 0 6px; }
+.voys-herinnering p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+.voys-acties { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
