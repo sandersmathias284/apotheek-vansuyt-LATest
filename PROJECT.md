@@ -37,7 +37,7 @@ Covid: vaste dagen, afspraak noodzakelijk. Griep: op zaterdag, andere dagen mits
 
 - Geen erkenningsnummer, geen BTW-nummer, geen coördinaten in de footer.
 - Maïté enkel als teamkaart onderaan de onthaalpagina; nergens anders vermeld.
-- Portretten Sabine & Maïté: statische plaatshouders (initiaal) tot de echte foto's er zijn. Geen uploadslots voor bezoekers.
+- Portretten Sabine & Maïté: echte foto's sinds 21/10/2026 (`public/assets/team-*-300/600.jpg`, uitsnede 3:4). Geen uploadslots voor bezoekers.
 - Hero: witte achtergrond, interieurfoto (`assets/interieur-web.jpg`), geen stockfoto.
 - Producten-pagina staat geparkeerd (code in Catalog.jsx, niet in navigatie).
 - Semantische HTML (header/nav/main/section/article/footer, h-hiërarchie, aria-labels), toetsenbord-focus zichtbaar.
@@ -45,7 +45,6 @@ Covid: vaste dagen, afspraak noodzakelijk. Griep: op zaterdag, andere dagen mits
 ## Nog open
 
 - Volledige naam en functie van Maïté (nu "Apotheker")
-- Portretfoto's Sabine en Maïté
 - Reservatieformulier aansluiten (e-mail + bevestiging naar patiënt)
 - Pagina "Vervallen geneesmiddelen" (eigenaar levert inhoud/pictogrammen aan; eigen layout en stijl)
 - Producten-pagina afwerken

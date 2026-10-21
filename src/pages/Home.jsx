@@ -199,7 +199,7 @@ export const HomePage = ({ setPage }) => {
         <div className="team">
           <article className="team-card">
             <div className="portrait">
-              <div className="portrait-ph" role="img" aria-label="Portret van Sabine volgt"><span>S</span></div>
+              <img src="/assets/team-sabine-300.jpg" srcSet="/assets/team-sabine-300.jpg 300w, /assets/team-sabine-600.jpg 600w" sizes="(max-width: 600px) 150px, 140px" width="600" height="800" loading="lazy" decoding="async" alt="Apotheker Sabine Vansuyt in de apotheek" />
             </div>
             <div>
               <h3>Sabine Vansuyt</h3>
@@ -210,7 +210,7 @@ export const HomePage = ({ setPage }) => {
           </article>
           <article className="team-card">
             <div className="portrait">
-              <div className="portrait-ph" role="img" aria-label="Portret van Maïté volgt"><span>M</span></div>
+              <img src="/assets/team-maite-300.jpg" srcSet="/assets/team-maite-300.jpg 300w, /assets/team-maite-600.jpg 600w" sizes="(max-width: 600px) 150px, 140px" width="600" height="800" loading="lazy" decoding="async" alt="Apotheker Maïté in de apotheek" />
             </div>
             <div>
               <h3>Maïté</h3>
