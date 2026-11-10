@@ -247,7 +247,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   cursor: pointer;
 }
 .btn-primary { background: var(--red); color: var(--white); }
-.btn-primary:hover { background: var(--red-deep); }
+/* `color` hoort hier expliciet bij: bij een <a class="btn btn-primary"> wint
+   `a:hover { color: var(--red-deep) }` hierboven anders van `.btn-primary`, en
+   dan staat er rode tekst op een rode knop — dus een lege balk. */
+.btn-primary:hover { background: var(--red-deep); color: var(--white); }
 .btn-ghost { background: transparent; color: var(--ink); border-color: var(--ink); }
 .btn-ghost:hover { background: var(--ink); color: var(--paper); }
 .btn .arr {
