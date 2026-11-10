@@ -1,6 +1,6 @@
 // Home page
 import React from "react";
-import { HOURS, todayIndex, useNow, IS_SERVER, holidaysOf, upcomingHolidays } from "../lib/hours.js";
+import { HOURS, todayIndex, useNow, IS_SERVER, holidaysOf, upcomingHolidays, isFeestdagOpen } from "../lib/hours.js";
 import { computeStatus } from "../components/Chrome.jsx";
 import { ClosurePanel, Countdown, fmtDateShort, WACHT_URL } from "../components/Closure.jsx";
 import { Icon } from "../components/Icon.jsx";
@@ -27,9 +27,11 @@ export const HomePage = ({ setPage }) => {
 
   // Vooraf gegenereerd (zonder "nu") blijft het de vaste lijst zonder jaartal;
   // in de browser worden het de eerstvolgende dagen, mét datum.
+  // Zei een bericht dat de apotheek op zo'n dag tóch open is, dan staat dat
+  // erbij in plaats van de sluitingsvermelding.
   const feestdagen = IS_SERVER
-    ? holidaysOf(now.getFullYear()).filter((h) => h.gesloten).map((h) => h.label)
-    : upcomingHolidays(now, 6).map((h) => h.whenLabel);
+    ? holidaysOf(now.getFullYear()).filter((h) => h.gesloten).map((h) => ({ tekst: h.label, open: false }))
+    : upcomingHolidays(now, 6).map((h) => ({ tekst: h.whenLabel, open: isFeestdagOpen(h.iso) }));
 
   // Is de apotheek vandaag dicht (feestdag of sluitingsperiode), dan mag de rij
   // "vandaag" in de urentabel niet enkel de gewone uren laten staan.
@@ -200,7 +202,14 @@ export const HomePage = ({ setPage }) => {
             <aside className="callout">
               <span className="mono">{IS_SERVER ? "Feestdagen" : "Komende feestdagen"}</span>
               <h3>Gesloten op</h3>
-              <p>{feestdagen.join(" · ")}.</p>
+              <p>
+                {feestdagen.map((f, i) => (
+                  <React.Fragment key={i}>
+                    {i ? " · " : ""}
+                    {f.open ? <span className="feestdag-open">{f.tekst} — wij zijn open</span> : f.tekst}
+                  </React.Fragment>
+                ))}.
+              </p>
               <p className="callout-extra">
                 Ook op sluitingsdagen is er altijd een apotheek van wacht. <a className="inline" href={hrefOf("wachtdienst")} onClick={(e) => { e.preventDefault(); setPage("wachtdienst"); }}>Apotheek van&nbsp;wacht&nbsp;→</a>
               </p>

@@ -1,7 +1,8 @@
 // Beheer — beveiligde pagina om sluitingsperiodes te beheren
 import React from "react";
 import { useNow } from "../lib/hours.js";
-import { useClosures, activeClosure, writeClosures, pushClosures, fetchClosures, remoteState, checkCode, isoOf, fmtDate, WACHT_URL } from "../components/Closure.jsx";
+import { useClosures, activeClosure, writeClosures, pushClosures, fetchClosures, remoteState, checkCode, isoOf, fmtDate, dayStart, useFeestdagOpen, WACHT_URL } from "../components/Closure.jsx";
+import { holidayOn } from "../lib/feestdagen.js";
 import { VaccinatieAgenda } from "./Catalog.jsx";
 import { hrefOf } from "../routes.js";
 import { NIEUWS_API } from "../components/Nieuws.jsx";
@@ -90,6 +91,10 @@ const BeheerPanel = ({ setPage, onLock }) => {
   // Bewaart centraal via de Netlify-functie
   // Herinnering voor de telefoon (Voys) na het bewaren van een periode.
   const [voysHerinnering, setVoysHerinnering] = React.useState(null);
+  // Een nieuw bericht kan een sluitingsvoorstel opleveren. De balk staat
+  // bovenaan; bij het berichtenformulier komt dan een regel die erheen wijst.
+  const [voorstelRonde, setVoorstelRonde] = React.useState(0);
+  const [voorstelWijzer, setVoorstelWijzer] = React.useState("");
 
   const commit = async (next, okMsg, periode) => {
     setList(writeClosures(next));
@@ -163,6 +168,20 @@ const BeheerPanel = ({ setPage, onLock }) => {
             <button type="button" className="bh-lock" onClick={onLock}>Vergrendelen</button>
           </div>
         </div>
+
+        <Sluitingsvoorstellen
+          ronde={voorstelRonde}
+          onNieuw={() => setVoorstelWijzer("Er is een sluitingsvoorstel bovenaan de pagina.")}
+          onToegevoegd={(v, melding, dubbel) => {
+            // De server bewaarde de sluiting al: opnieuw ophalen laat de lijst
+            // hieronder en de statusbalk op de website meteen volgen.
+            fetchClosures();
+            say(melding);
+            // Ook een open-dag vraagt iets van de telefoon: dan moet de
+            // doorschakeling juist uit. VoysHerinnering draait de tekst om.
+            if (!dubbel) setVoysHerinnering({ periode: { from: v.from, to: v.to }, openDag: v.soort === "open" });
+          }}
+        />
 
         {sync.msg ? (
           <div className={`bh-sync ${sync.state}`} role="status" aria-live="polite">{sync.msg}</div>
@@ -239,6 +258,7 @@ const BeheerPanel = ({ setPage, onLock }) => {
                 })}
               </ul>
             )}
+            <FeestdagenOpen onKlaar={(m) => say(m)} />
             <aside className="callout" style={{ marginTop: 24 }}>
               <span className="mono">Zo werkt het</span>
               <h3>Automatisch aan en uit</h3>
@@ -248,7 +268,10 @@ const BeheerPanel = ({ setPage, onLock }) => {
         </div>
       </section>
 
-      <BeheerBerichten />
+      <BeheerBerichten
+        wijzer={voorstelWijzer}
+        onGeplaatst={() => { setVoorstelWijzer(""); setVoorstelRonde((r) => r + 1); }}
+      />
 
       <section className="container section beheer bh-vacc">
         <div className="bh-top">
@@ -274,15 +297,20 @@ const BeheerPanel = ({ setPage, onLock }) => {
 // De telefoon staat los van de website: na elke bewaarde periode een herinnering.
 const VOYS_URL = "https://www.voys.be/";
 
-const VoysHerinnering = ({ periode, onSluit }) => (
+const VoysHerinnering = ({ periode, openDag, onSluit }) => (
   <aside className="voys-herinnering" role="status" aria-live="polite">
     <div>
       <span className="mono">Telefoon · Voys</span>
       <h3>Vergeet de telefoon niet</h3>
       <p>
-        {periode
-          ? <>Stel in Voys ook de sluiting in van <strong>{fmtDate(periode.from)}</strong> tot en met <strong>{fmtDate(periode.to)}</strong>, zodat bellers de juiste melding horen.</>
-          : <>Pas in Voys ook de sluiting aan, zodat bellers de juiste melding horen.</>}
+        {openDag && periode
+          // Op een feestdag staat de telefoon normaal doorgeschakeld naar de
+          // wachtdienst. Bent u die dag open, dan moet die doorschakeling uit,
+          // anders sturen bellers naar een andere apotheek terwijl u er staat.
+          ? <>Zet in Voys de doorschakeling <strong>uit</strong> voor <strong>{fmtDate(periode.from)}</strong>: op een feestdag gaan bellers anders naar de apotheek van wacht, terwijl u gewoon open bent.</>
+          : periode
+            ? <>Stel in Voys ook de sluiting in van <strong>{fmtDate(periode.from)}</strong> tot en met <strong>{fmtDate(periode.to)}</strong>, zodat bellers de juiste melding horen.</>
+            : <>Pas in Voys ook de sluiting aan, zodat bellers de juiste melding horen.</>}
       </p>
     </div>
     <div className="voys-acties">
@@ -291,6 +319,241 @@ const VoysHerinnering = ({ periode, onSluit }) => (
     </div>
   </aside>
 );
+
+// ---------- Sluitingsvoorstellen ----------
+// Een nieuwsbericht dat een sluiting aankondigt levert een voorstel op. Het
+// wordt nooit zelf een sluiting: een foute lezing zou de apotheek op de website
+// sluiten terwijl ze open is. De apotheker tikt Toevoegen of Negeren.
+const VOORSTELLEN_API = "/api/closure-voorstellen";
+const VOORSTELLEN_ID = "sluitingsvoorstellen";
+
+// "woensdag 11 november 2026" — de weekdag staat erbij zodat een gelezen datum
+// in één oogopslag te controleren is.
+const fmtDagDatum = (iso) =>
+  iso ? dayStart(iso).toLocaleDateString("nl-BE", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "";
+
+const bronRegel = (v) => {
+  const d = v.berichtDatum ? new Date(v.berichtDatum) : null;
+  return d && !Number.isNaN(d.getTime())
+    ? `Uit het bericht van ${d.toLocaleDateString("nl-BE", { day: "numeric", month: "long" })}:`
+    : "Uit een bericht:";
+};
+
+// Eén dag leest als "Gesloten op vrijdag 14 mei", niet als "van ... tot en met ...".
+// Een open-dag zegt er de feestdag bij, want dát is wat het bericht overrulet.
+const isOpen = (v) => v.soort === "open";
+const periodeZin = (v) => {
+  const woord = isOpen(v) ? "Open" : "Gesloten";
+  const basis = v.from === v.to
+    ? `${woord} op ${fmtDagDatum(v.from)}`
+    : `${woord} van ${fmtDagDatum(v.from)} tot en met ${fmtDagDatum(v.to)}`;
+  return isOpen(v) && v.reason ? `${basis}, ook al is het ${v.reason}` : basis;
+};
+// Kort, voor de naam van een knop.
+const periodeKort = (v) => (v.from === v.to ? fmtDate(v.from) : `${fmtDate(v.from)} tot ${fmtDate(v.to)}`);
+
+// De korte reden die de server uit het bericht las ("Brugdagen", "Jaarlijkse
+// vakantie"). Ze staat in het veld en is aan te passen vóór ze op de site komt.
+const standaardReden = (v) => (v.reason || "Gesloten").slice(0, 120);
+
+// Geen statuscodes of Engelse browserfouten tonen, maar gewone taal.
+const foutTekst = (res, data) => {
+  if (!res) return "Geen verbinding met de server. Probeer het opnieuw.";
+  if (data && data.melding) return data.melding; // 401 en 429 leggen het zelf al uit
+  if (res.status === 404) return "Dit voorstel was al afgehandeld, misschien in een ander venster.";
+  return "De server kon het niet bewaren. Probeer het opnieuw.";
+};
+
+const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
+  const code = () => { try { return sessionStorage.getItem(CODE_KEY) || ""; } catch (e) { return ""; } };
+  const [list, setList] = React.useState([]);
+  const [redenen, setRedenen] = React.useState({});
+  const [bezig, setBezig] = React.useState("");
+  const [fout, setFout] = React.useState({ id: "", tekst: "" });
+  const [melding, setMelding] = React.useState("");
+  const [laadfout, setLaadfout] = React.useState("");
+  const kader = React.useRef(null);
+  const gezien = React.useRef(new Set());
+
+  // Bij het laden ook de al bewaarde berichten herscannen, zodat een sluiting
+  // uit een ouder bericht hier alsnog boven komt. Na een nieuw bericht volstaat
+  // gewoon ophalen: de server heeft het dan al gelezen.
+  React.useEffect(() => {
+    let af = false;
+    (async () => {
+      try {
+        const vraag = ronde ? "" : "herscan=1&";
+        const res = await fetch(`${VOORSTELLEN_API}?${vraag}t=${Date.now()}`, { headers: { "X-Beheer-Code": code() }, cache: "no-store" });
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.json();
+        if (af) return;
+        const nieuw = Array.isArray(data.voorstellen) ? data.voorstellen : [];
+        setLaadfout("");
+        setList(nieuw);
+        const bij = nieuw.filter((v) => !gezien.current.has(v.id));
+        nieuw.forEach((v) => gezien.current.add(v.id));
+        if (ronde && bij.length && onNieuw) onNieuw(bij.length);
+      } catch (e) {
+        // Stil mislukken is erger dan een regel tekst: dan denkt ze dat er
+        // gewoon geen voorstel is.
+        if (!af) setLaadfout("De sluitingsvoorstellen konden niet opgehaald worden. Herlaad de pagina om het opnieuw te proberen.");
+      }
+    })();
+    return () => { af = true; };
+  }, [ronde]);
+
+  const doe = async (v, actie) => {
+    setBezig(v.id);
+    setFout({ id: "", tekst: "" });
+    let res = null;
+    let data = null;
+    let weg = false; // is de balk verdwenen? dan moet de focus mee verhuizen
+    try {
+      const reden = (redenen[v.id] === undefined ? standaardReden(v) : redenen[v.id]).trim() || "Gesloten";
+      res = await fetch(`${VOORSTELLEN_API}/${v.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Beheer-Code": code() },
+        body: JSON.stringify(actie === "toevoegen" && !isOpen(v) ? { actie, reden } : { actie }),
+      });
+      data = await res.json().catch(() => null);
+      if (res.status === 404) {
+        // Elders al afgehandeld: de balk hoort weg, niet blijven falen.
+        weg = true;
+        setList((l) => l.filter((x) => x.id !== v.id));
+        setMelding(foutTekst(res, null));
+        return;
+      }
+      if (!res.ok) throw new Error("niet bewaard");
+      weg = true;
+      setList((l) => l.filter((x) => x.id !== v.id));
+      if (actie === "toevoegen") {
+        const dubbel = !!(data && data.dubbel);
+        if (isOpen(v)) {
+          setMelding(dubbel
+            ? "Die dag stond al als open."
+            : "Feestdag aangepast. De apotheek staat die dag nu als open op de website.");
+        } else {
+          setMelding(dubbel
+            ? "Die periode stond al in de lijst — er is niets dubbel bijgekomen."
+            : "Sluiting toegevoegd. Ze staat nu op de website.");
+        }
+        if (onToegevoegd) onToegevoegd(v, (data && data.melding) || "Toegevoegd.", dubbel);
+      } else {
+        setMelding("Voorstel genegeerd.");
+      }
+    } catch (e) {
+      setFout({ id: v.id, tekst: foutTekst(res && res.status ? res : null, data) });
+    } finally {
+      setBezig("");
+      // De gedrukte knop verdwijnt uit de pagina: focus naar het kader, dat nu
+      // de melding draagt, in plaats van terug naar de bovenkant van de pagina.
+      if (weg && kader.current) kader.current.focus();
+    }
+  };
+
+  // Het kader staat er altijd (leeg is het onzichtbaar), zodat een schermlezer
+  // een voorstel dat later binnenkomt wél hoort.
+  return (
+    <div className="voorstellen" id={VOORSTELLEN_ID} ref={kader} tabIndex={-1} aria-live="polite">
+      {list.map((v) => (
+        <aside className={`voorstel ${isOpen(v) ? "voorstel-open" : ""}`} key={v.id} aria-label={`${isOpen(v) ? "Voorgestelde open dag" : "Voorgestelde sluiting"} ${periodeKort(v)}`}>
+          <div>
+            <span className="mono">{isOpen(v) ? "Voorstel · feestdag toch open" : "Voorstel · gelezen uit een bericht"}</span>
+            <p className="voorstel-bron">{bronRegel(v)} {v.berichtTitel ? <strong>{v.berichtTitel}</strong> : <em>bericht zonder titel</em>}</p>
+            <h2>{periodeZin(v)}</h2>
+            <p className="voorstel-uitleg">
+              {isOpen(v)
+                ? "De website toont die dag nu nog Gesloten, omdat het een feestdag is. Toevoegen laat de gewone uren gelden. Een sluitingsperiode die u zelf ingaf blijft wel voorgaan."
+                : "Dit staat nog niet op de website. Toevoegen zet de sluiting meteen online."}
+            </p>
+            {isOpen(v) ? null : (
+              <label className="bh-field voorstel-reden">
+                <span>Reden (zichtbaar op de website)</span>
+                <input
+                  type="text"
+                  maxLength={120}
+                  value={redenen[v.id] === undefined ? standaardReden(v) : redenen[v.id]}
+                  onChange={(e) => setRedenen({ ...redenen, [v.id]: e.target.value })}
+                  placeholder="Gesloten"
+                />
+              </label>
+            )}
+            {fout.id === v.id ? <p className="field-error" role="alert">{fout.tekst}</p> : null}
+          </div>
+          <div className="voorstel-acties">
+            <button type="button" className="btn btn-primary" disabled={bezig === v.id} onClick={() => doe(v, "toevoegen")}>
+              {bezig === v.id ? "Bezig…" : "Toevoegen"}<span className="sr-only"> — {periodeKort(v)}</span><span className="arr" aria-hidden="true"></span>
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={bezig === v.id} onClick={() => doe(v, "negeren")}>
+              Negeren<span className="sr-only"> — {periodeKort(v)}</span>
+            </button>
+          </div>
+        </aside>
+      ))}
+      {laadfout ? <p className="voorstel-melding err">{laadfout}</p> : null}
+      {melding ? <p className="voorstel-melding">{melding}</p> : null}
+    </div>
+  );
+};
+
+// ---------- Feestdagen waarop de apotheek toch open is ----------
+// Wat hier staat, kwam uit een nieuwsbericht en is door haarzelf bevestigd.
+// Eén verkeerde tik mag niet betekenen dat een feestdag voorgoed open staat,
+// dus kan elke dag hier weer teruggedraaid worden.
+const FeestdagenOpen = ({ onKlaar }) => {
+  const code = () => { try { return sessionStorage.getItem(CODE_KEY) || ""; } catch (e) { return ""; } };
+  const dagen = useFeestdagOpen();
+  const [bezig, setBezig] = React.useState("");
+  const [fout, setFout] = React.useState("");
+
+  const terug = async (dag) => {
+    setBezig(dag);
+    setFout("");
+    let res = null;
+    let data = null;
+    try {
+      res = await fetch(`${VOORSTELLEN_API}/${dag}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Beheer-Code": code() },
+        body: JSON.stringify({ actie: "feestdag-terug" }),
+      });
+      data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error("niet bewaard");
+      await fetchClosures();
+      if (onKlaar) onKlaar((data && data.melding) || "De feestdag geldt weer.");
+    } catch (e) {
+      setFout(foutTekst(res && res.status ? res : null, data));
+    } finally {
+      setBezig("");
+    }
+  };
+
+  if (!dagen.length) return null;
+
+  return (
+    <div className="bh-feestdagen">
+      <h3>Feestdagen waarop u toch open bent</h3>
+      <p className="bh-feestdagen-lede">
+        Gelezen uit een nieuwsbericht en door u bevestigd. De website toont op die dagen gewoon de openingsuren.
+      </p>
+      <ul>
+        {dagen.map((d) => {
+          const f = holidayOn(dayStart(d));
+          const naam = f ? f.name : "Feestdag";
+          return (
+            <li key={d}>
+              <span><strong>{naam}</strong> {fmtDate(d)} — wij zijn open</span>
+              <button type="button" disabled={bezig === d} onClick={() => terug(d)}>
+                {bezig === d ? "Bezig…" : "Terugdraaien"}<span className="sr-only"> — {naam} {fmtDate(d)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {fout ? <p className="field-error" role="alert">{fout}</p> : null}
+    </div>
+  );
+};
 
 // ---------- Berichten (nieuws op de onthaalpagina) ----------
 const leegBericht = () => ({ titel: "", tekst: "", knopLabel: "", knopUrl: "", facebookUrl: "", vastgezet: false, verloopt: "", foto: "", fotoNaam: "" });
@@ -302,7 +565,7 @@ const leesAlsDataUrl = (file) => new Promise((resolve, reject) => {
   r.readAsDataURL(file);
 });
 
-const BeheerBerichten = () => {
+const BeheerBerichten = ({ wijzer, onGeplaatst }) => {
   const code = () => { try { return sessionStorage.getItem(CODE_KEY) || ""; } catch (e) { return ""; } };
   const [list, setList] = React.useState([]);
   const [draft, setDraft] = React.useState(leegBericht);
@@ -351,6 +614,8 @@ const BeheerBerichten = () => {
       formEl.reset();
       setMsg({ state: "ok", text: "Bericht geplaatst — het staat nu op de onthaalpagina." });
       laad();
+      // De server leest het bericht meteen: de voorstellen bovenaan opnieuw ophalen.
+      if (onGeplaatst) onGeplaatst();
     } catch (err) {
       setMsg({ state: "err", text: `Plaatsen lukte niet (${err.message}).` });
     }
@@ -426,6 +691,11 @@ const BeheerBerichten = () => {
           <div className="bh-form-actions">
             <button className="btn btn-primary" type="submit" disabled={msg.state === "busy"}>Bericht plaatsen<span className="arr" aria-hidden="true"></span></button>
           </div>
+          {wijzer ? (
+            <p className="bh-wijzer" role="status">
+              {wijzer} <a className="inline" href={`#${VOORSTELLEN_ID}`}>Naar het voorstel</a>
+            </p>
+          ) : null}
         </form>
         <div className="bh-list">
           <h2>Geplaatste berichten</h2>

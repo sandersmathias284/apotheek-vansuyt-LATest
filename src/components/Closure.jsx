@@ -1,9 +1,11 @@
 // Sluitingsperiodes (vakantie / verlof) — store + banner + countdown
 import React from "react";
-import { HOURS, useNow, closedHolidayOn } from "../lib/hours.js";
+import { HOURS, useNow, closedHolidayOn, setFeestdagOpen } from "../lib/hours.js";
 import { hrefOf } from "../routes.js";
 
 const CLOSURE_KEY = "vansuyt.closures.v1";
+// Feestdagen waarop de apotheek volgens een nieuwsbericht tóch open is.
+const FEESTDAG_OPEN_KEY = "vansuyt.feestdagopen.v1";
 const WACHT_URL = "https://www.apotheek.be/pharmacysearch";
 const CLOSURE_API = "/api/closures";
 
@@ -19,6 +21,27 @@ const readClosures = () => {
     return Array.isArray(arr) ? arr : [];
   } catch (e) { return []; }
 };
+
+// Dezelfde opzet als de sluitingen: de server beslist, localStorage laat de
+// pagina meteen het juiste tonen. hours.js krijgt de lijst via een
+// module-variabele, zodat daar geen fetch in hoeft.
+const readFeestdagOpen = () => {
+  try {
+    const arr = JSON.parse(localStorage.getItem(FEESTDAG_OPEN_KEY) || "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+};
+
+const cacheFeestdagOpen = (list) => {
+  const dagen = (Array.isArray(list) ? list : []).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v));
+  try { localStorage.setItem(FEESTDAG_OPEN_KEY, JSON.stringify(dagen)); } catch (e) {}
+  setFeestdagOpen(dagen);
+  return dagen;
+};
+
+// Meteen bij het laden, nog vóór de eerste fetch: anders toont de pagina één
+// tel lang "Gesloten" op een feestdag waarop ze gewoon open is.
+if (typeof window !== "undefined") setFeestdagOpen(readFeestdagOpen());
 
 const cacheClosures = (list) => {
   const sorted = [...list].sort((a, b) => (a.from < b.from ? -1 : 1));
@@ -39,6 +62,9 @@ const fetchClosuresNu = async () => {
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     remoteOk = true;
+    // Eerst de feestdagen, dan de sluitingen: cacheClosures stuurt het event
+    // waarop de pagina opnieuw rekent, en die moet beide al kennen.
+    cacheFeestdagOpen(data.feestdagOpen);
     return cacheClosures(Array.isArray(data.closures) ? data.closures : []);
   } catch (e) {
     remoteOk = false;
@@ -124,6 +150,22 @@ const splitDuration = (ms) => {
     minutes: Math.floor((total % 3600) / 60),
     seconds: total % 60,
   };
+};
+
+// De feestdagen waarop de apotheek toch open is, zoals de cache ze kent.
+// Volgt hetzelfde event als useClosures, dus na een fetch rekent de pagina mee.
+const useFeestdagOpen = () => {
+  const [lijst, setLijst] = React.useState(readFeestdagOpen);
+  React.useEffect(() => {
+    const sync = () => setLijst(readFeestdagOpen());
+    window.addEventListener("vansuyt:closures", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("vansuyt:closures", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  return lijst;
 };
 
 const useClosures = () => {
@@ -276,7 +318,8 @@ const checkCode = async (code) => {
 };
 
 export {
-  CLOSURE_KEY, WACHT_URL, CLOSURE_API, remoteState, checkCode,
+  CLOSURE_KEY, FEESTDAG_OPEN_KEY, WACHT_URL, CLOSURE_API, remoteState, checkCode,
+  readFeestdagOpen, cacheFeestdagOpen, useFeestdagOpen,
   readClosures, writeClosures, cacheClosures, fetchClosures, pushClosures, useClosures,
   activeClosure, upcomingClosures, reopenMoment,
   dayStart, dayEnd, isoOf, fmtDate, fmtDateShort, splitDuration,

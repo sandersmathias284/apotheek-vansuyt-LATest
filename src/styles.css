@@ -1911,3 +1911,46 @@ html.js noscript{display:none !important}
 .voys-herinnering h3 { font-family: var(--serif); font-weight: 400; font-size: 22px; line-height: 1.2; margin: 0 0 6px; }
 .voys-herinnering p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .voys-acties { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Beheer: sluiting gelezen uit een nieuwsbericht (altijd een voorstel — het
+   wordt pas een sluiting als de apotheker Toevoegen tikt) */
+.voorstellen { display: grid; gap: 12px; margin: 0 0 16px; }
+.voorstel { border: 1px solid var(--clay); background: var(--paper-2); border-radius: var(--radius); padding: 20px 22px; display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.voorstel > div:first-child { flex: 1 1 320px; min-width: 0; }
+.voorstel .mono { display: block; margin-bottom: 6px; color: var(--clay-deep); }
+.voorstel h2 { font-family: var(--serif); font-weight: 400; font-size: 22px; line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 8px; }
+.voorstel-bron { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--ink-3); }
+.voorstel-uitleg { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+.voorstel .field-error { margin-top: 12px; }
+.voorstel-reden { margin-top: 14px; max-width: 420px; }
+.voorstel-reden > span { color: var(--ink-3); }
+.voorstel-melding { margin: 0; padding: 12px 14px; border-left: 2px solid var(--sage); background: var(--paper-2); font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+.voorstel-melding.err { border-left-color: var(--clay); }
+/* Leeg kader: niets te zien, maar het blijft in de pagina staan zodat een
+   schermlezer een voorstel hoort dat later binnenkomt. */
+.voorstellen:empty { margin: 0; }
+/* Voorstel van de soort "open": de apotheek is die feestdag tóch open. Groen
+   in plaats van kleirood, zodat de twee soorten niet te verwarren zijn. */
+.voorstel-open { border-color: var(--sage); }
+.voorstel-open .mono { color: var(--sage-deep); }
+/* Beheer: feestdagen die door een bericht zijn uitgezet, onder de periodes. */
+.bh-feestdagen { margin-top: 24px; border-top: 1px solid var(--rule-soft); padding-top: 18px; }
+.bh-feestdagen h3 { font-family: var(--serif); font-weight: 400; font-size: 20px; line-height: 1.2; margin: 0 0 6px; }
+.bh-feestdagen-lede { margin: 0 0 12px; font-size: 13.5px; line-height: 1.55; color: var(--ink-3); }
+.bh-feestdagen ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bh-feestdagen li { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-left: 2px solid var(--sage); background: var(--paper-2); padding: 10px 12px; font-size: 14px; }
+.bh-feestdagen li > span { min-width: 0; }
+.bh-feestdagen button { background: none; border: 1px solid var(--ink); border-radius: 999px; padding: 9px 16px; font-size: 13px; min-height: 44px; }
+.bh-feestdagen button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+.bh-feestdagen button:disabled { opacity: .6; cursor: progress; }
+/* Feestdag waarop de apotheek open is, in de lijst op de onthaalpagina. */
+.feestdag-open { color: var(--sage-deep); }
+/* Wijzer bij het berichtenformulier naar de balk bovenaan. */
+.bh-wijzer { margin: 14px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+.bh-wijzer a.inline { color: var(--red-deep); border-bottom: 1px solid var(--red); padding-bottom: 1px; }
+.voorstel-acties { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .voorstel { padding: 18px; }
+  .voorstel-acties { width: 100%; }
+  .voorstel-acties .btn { flex: 1 1 auto; justify-content: center; }
+}

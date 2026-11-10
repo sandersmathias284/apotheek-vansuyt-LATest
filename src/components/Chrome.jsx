@@ -25,6 +25,15 @@ const nextOpening = (now, nm) => {
   return {};
 };
 
+// Rangorde, van sterk naar zwak:
+//   1. een sluitingsperiode die de apotheker zelf bewaarde (activeClosure)
+//   2. een feestdag die een nieuwsbericht open verklaarde (feestdag-open, via
+//      closedHolidayOn)
+//   3. de feestdagenlijst in hours.js
+//   4. de weekuren in HOURS
+// Het bericht gaat dus vóór de lijst — die lijst is een aanname, geen wet. Maar
+// een sluiting die zij zelf ingaf gaat vóór het bericht, zodat een verkeerd
+// gelezen bericht nooit de deur kan openzetten tijdens haar vakantie.
 export const computeStatus = (now) => {
   const cl = activeClosure(now);
   if (cl) return { open: false, label: "Gesloten", closure: cl, reopenAt: reopenMoment(cl) };
