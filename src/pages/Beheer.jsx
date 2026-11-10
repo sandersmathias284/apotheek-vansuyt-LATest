@@ -11,7 +11,9 @@ const CODE_KEY = "vansuyt.beheer.code";
 
 const BeheerPage = ({ setPage }) => {
   const [unlocked, setUnlocked] = React.useState(() => {
-    try { return sessionStorage.getItem(SESSION_KEY) === "1"; } catch (e) { return false; }
+    // Zonder de code erbij kan er toch niets bewaard worden: dan vragen we ze
+    // opnieuw in plaats van een paneel te tonen waar opslaan mislukt.
+    try { return sessionStorage.getItem(SESSION_KEY) === "1" && !!sessionStorage.getItem(CODE_KEY); } catch (e) { return false; }
   });
   const [pin, setPin] = React.useState("");
   const [err, setErr] = React.useState("");
@@ -20,7 +22,8 @@ const BeheerPage = ({ setPage }) => {
   const submit = async (e) => {
     e.preventDefault();
     const code = pin.trim();
-    if (!code || busy) return;
+    if (busy) return;
+    if (!code) { setErr("Vul de beheercode in."); return; }
     setBusy(true);
     const res = await checkCode(code);
     setBusy(false);

@@ -1204,13 +1204,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-left: 1px solid var(--rule);
   z-index: 70;
   transform: translateX(100%);
-  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  /* Gesloten: niets zichtbaar, geen tabstops, niet voorgelezen. visibility
+     schakelt pas na het uitschuiven om, zodat de beweging intact blijft. */
+  visibility: hidden;
+  transition: transform .3s cubic-bezier(.4,0,.2,1), visibility 0s linear .3s;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   box-shadow: -16px 0 48px rgba(27,36,29,0.12);
 }
-.drawer.open { transform: translateX(0); }
+.drawer.open {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform .3s cubic-bezier(.4,0,.2,1), visibility 0s linear 0s;
+}
 .drawer-head {
   display: flex;
   align-items: center;
@@ -1791,6 +1798,110 @@ html.js noscript{display:none !important}
   .map-block .leaflet-bar.leaflet-control a { width: 44px; height: 44px; line-height: 44px; }
   .brand { padding-top: 8px; padding-bottom: 8px; }
   .callout a, .drawer-foot a, .breadcrumb a, dd a { display: inline-block; padding-top: 11px; padding-bottom: 11px; }
+}
+
+/* ============ BUGFIXES (2026-11-10): feestdagen, menu, formulier, kaart ============ */
+
+/* Feestdagenkaart: de regel over de wachtdienst staat los onder de lijst */
+.callout .callout-extra { margin-top: 10px; }
+
+/* Statuspil zegt nu ook wanneer de deur weer opengaat ("Gesloten · opent morgen
+   08:30"). In de balk past die regel pas vanaf 640px naast het logo (gemeten:
+   onder 600px schuift ze eroverheen, want het logo mag niet krimpen). Op een
+   telefoon staat ze daarom in het menupaneel, waar ze mag wikkelen. */
+@media (max-width: 639px) {
+  .header .status-when { display: none; }
+}
+.drawer .status-pill { white-space: normal; min-width: 0; line-height: 1.35; }
+.drawer-head { gap: 12px; }
+
+/* Verplicht veld zichtbaar aanduiden (het woord zelf, geen sterretje) */
+.field label .req { text-transform: none; letter-spacing: 0.02em; color: var(--ink-3); font-size: 12px; }
+/* Veld met een melding: zelfde rood als de melding eronder */
+.field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-bottom-color: var(--red); }
+
+/* Besteloverzicht: een naam zonder spaties mag de pagina niet oprekken */
+.summary-row > * { min-width: 0; }
+.summary-row dd { overflow-wrap: anywhere; }
+
+/* Kaart op /contact/: melding met het adres als de kaartdienst niet laadt */
+.map-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.map-fallback p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+
+/* Nieuwsfoto op de telefoon helemaal tonen: in een vak van 200px hoog werd de
+   tekst in de affiche weggesneden */
+@media (max-width: 620px) {
+  .news-photo { min-height: 0; position: static; }
+  .news-photo img { position: static; width: 100%; height: auto; display: block; }
+}
+
+/* ============ RONDE 2 (2026-11-10) ============ */
+
+/* Nieuwsfoto op tablet en desktop: het vak is zo hoog als de tekst ernaast, dus
+   sneed `cover` links en rechts weg — ook de datum op een affiche ("11/11" werd
+   "1/11"). `contain` toont de hele foto; wat overblijft is de kleur van de kaart,
+   niet een grijs vlak. */
+@media (min-width: 621px) {
+  .news-photo { background: var(--cream); }
+  .news-photo img { object-fit: contain; object-position: center; }
+}
+
+/* Header: het telefoonicoon in de belknop werd tot 0 px platgedrukt zodra de
+   statuspil langer werd ("Gesloten · opent morgen 08:30"). Het icoon krimpt nu
+   niet meer mee, en de navigatie staat vanaf 1440 px wat dichter op elkaar
+   zodat logo, navigatie, pil en belknop naast elkaar blijven passen. */
+.phone-cta .icon-svg { flex: none; }
+@media (max-width: 1440px) {
+  .nav a { padding: 8px 9px; }
+}
+/* Omgekeerd probleem op een kleine telefoon: "Open tot 12:00" is de langste pil
+   en schoof op 320 px over het logo. Daar staat ze compacter, en als het dan nog
+   niet past krimpt het logo mee in plaats van eronder te verdwijnen. */
+@media (max-width: 480px) {
+  /* Alleen compacter, niet kleiner: 12 px is de ondergrens voor leesbare tekst. */
+  .header .status-pill { letter-spacing: 0.02em; padding: 6px 9px 6px 8px; gap: 6px; }
+  .header .status-dot { flex: none; }
+  /* Blijft er toch te weinig over, dan krimpt het logo mee in plaats van onder
+     de pil te schuiven. Het wordt niet uitgerekt: `object-fit: contain`
+     hierboven houdt de verhouding. */
+  .brand-logo { max-width: 100%; }
+}
+
+/* Formulier: de melding staat bij het veld zelf. Ze stond onderaan het
+   formulier, buiten beeld, terwijl de focus naar het veld sprong. */
+.field-error {
+  margin: 0;
+  padding: 10px 12px;
+  background: #FDF4F4;
+  border-left: 2px solid var(--red);
+  color: var(--red-deep);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* Urentabel: vandaag gesloten (feestdag of vakantie) — de gewone uren alleen
+   zouden misleiden naast een rode stip die "vandaag" betekent. */
+/* De dagnaam (met de stip van "vandaag") blijft op één regel: de extra melding
+   in de cel ernaast maakte de kolom anders zo smal dat "● Woensdag" afbrak. */
+.hours-table th { white-space: nowrap; }
+.hours-table .today-note {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--red-deep);
 }
 
 /* Beheer: herinnering telefoon (Voys) */

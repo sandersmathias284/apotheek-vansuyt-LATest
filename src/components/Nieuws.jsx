@@ -68,7 +68,9 @@ export const Nieuws = () => {
         <article className={`news-lead ${foto ? "" : "no-photo"}`}>
           {foto ? (
             <div className="news-photo">
-              <img src={foto} alt={lead.fotoAlt || ""} loading="lazy" />
+              {/* Zonder beschrijving van de eigenaar: minstens zeggen waar de
+                  foto bij hoort, want in de affiche staat vaak zelf tekst. */}
+              <img src={foto} alt={lead.fotoAlt || (lead.titel ? `Foto bij het bericht: ${lead.titel}` : "Foto bij dit bericht")} loading="lazy" />
             </div>
           ) : null}
           <div className="news-body">

@@ -1,6 +1,6 @@
 // Home page
 import React from "react";
-import { HOURS, todayIndex, useNow, IS_SERVER } from "../lib/hours.js";
+import { HOURS, todayIndex, useNow, IS_SERVER, holidaysOf, upcomingHolidays } from "../lib/hours.js";
 import { computeStatus } from "../components/Chrome.jsx";
 import { ClosurePanel, Countdown, fmtDateShort, WACHT_URL } from "../components/Closure.jsx";
 import { Icon } from "../components/Icon.jsx";
@@ -24,6 +24,18 @@ export const HomePage = ({ setPage }) => {
   const today = HOURS[Math.max(tIdx, 0)];
 
   const clockStr = now.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
+
+  // Vooraf gegenereerd (zonder "nu") blijft het de vaste lijst zonder jaartal;
+  // in de browser worden het de eerstvolgende dagen, mét datum.
+  const feestdagen = IS_SERVER
+    ? holidaysOf(now.getFullYear()).filter((h) => h.gesloten).map((h) => h.label)
+    : upcomingHolidays(now, 6).map((h) => h.whenLabel);
+
+  // Is de apotheek vandaag dicht (feestdag of sluitingsperiode), dan mag de rij
+  // "vandaag" in de urentabel niet enkel de gewone uren laten staan.
+  const dichtVandaag = IS_SERVER || status.open
+    ? null
+    : status.holiday ? status.holiday.name : status.closure ? "vakantie" : null;
 
   return (
     <div className="page">
@@ -67,7 +79,7 @@ export const HomePage = ({ setPage }) => {
 
         <div className="hero-right">
           <div className="storefront">
-            <img src="/assets/interieur-web.jpg" width="1600" height="1200" alt="De toog van Apotheek Vansuyt met de bordeaux hanglampen en de rekken met geneesmiddelen" />
+            <img src="/assets/interieur-web.jpg" srcSet="/assets/interieur-800.jpg 800w, /assets/interieur-1200.jpg 1200w, /assets/interieur-web.jpg 1600w" sizes="(max-width: 900px) calc(100vw - 40px), (max-width: 1400px) 40vw, 505px" width="1600" height="1200" decoding="async" alt="De toog van Apotheek Vansuyt met de bordeaux hanglampen en de rekken met geneesmiddelen" />
           </div>
           <aside className={`now-card ${status.closure ? "now-card-closed" : ""}`} aria-label="Huidige status">
             {IS_SERVER ? (
@@ -90,7 +102,7 @@ export const HomePage = ({ setPage }) => {
             ) : (
               <>
                 <div>
-                  <p className="now-label">{today.day} — {status.open ? "Open vandaag" : "Gesloten"}</p>
+                  <p className="now-label">{today.day} — {status.holiday ? status.holiday.name : status.open ? "Open vandaag" : "Gesloten"}</p>
                   <p className="now-headline">
                     {status.open
                       ? <>Geopend tot <em>{status.until}</em></>
@@ -158,7 +170,7 @@ export const HomePage = ({ setPage }) => {
             <caption className="sr-only">Openingsuren per weekdag</caption>
             <tbody>
               {HOURS.map((h, i) => (
-                <tr key={i} className={i === tIdx ? "today" : ""}>
+                <tr key={i} className={i === tIdx ? (dichtVandaag ? "today today-closed" : "today") : ""}>
                   <th scope="row">{h.day}</th>
                   <td>
                     {h.open ? (
@@ -169,6 +181,9 @@ export const HomePage = ({ setPage }) => {
                     ) : (
                       <span className="closed">Gesloten — apotheek van wacht</span>
                     )}
+                    {i === tIdx && dichtVandaag ? (
+                      <span className="today-note">Vandaag gesloten — {dichtVandaag}</span>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -180,10 +195,15 @@ export const HomePage = ({ setPage }) => {
               <h3>Dringend buiten de uren?</h3>
               <p>Zoek de apotheek van wacht via <a className="inline" href="https://www.apotheek.be/pharmacysearch" target="_blank" rel="noreferrer">apotheek.be</a> of bel <a className="inline" href="tel:090399000">0903 99 000</a>. Huisarts van wacht: <a className="inline" href="tel:1733">1733</a>. Bij levensgevaar: <a className="inline" href="tel:112">112</a>. <a className="inline" href={hrefOf("wachtdienst")} onClick={(e) => { e.preventDefault(); setPage("wachtdienst"); }}>Alle wachtinfo →</a></p>
             </aside>
+            {/* Deze lijst komt uit hours.js — dezelfde lijst die de open/gesloten-
+                status gebruikt, zodat tekst en status niet kunnen verschillen. */}
             <aside className="callout">
-              <span className="mono">Feestdagen 2026</span>
+              <span className="mono">{IS_SERVER ? "Feestdagen" : "Komende feestdagen"}</span>
               <h3>Gesloten op</h3>
-              <p>1 januari · Paasmaandag · 1 mei · O.L.H. Hemelvaart · Pinkstermaandag · 21 juli · 15 augustus · 1 &amp; 11 november · 25 december.</p>
+              <p>{feestdagen.join(" · ")}.</p>
+              <p className="callout-extra">
+                Ook op sluitingsdagen is er altijd een apotheek van wacht. <a className="inline" href={hrefOf("wachtdienst")} onClick={(e) => { e.preventDefault(); setPage("wachtdienst"); }}>Apotheek van&nbsp;wacht&nbsp;→</a>
+              </p>
             </aside>
           </div>
         </div>

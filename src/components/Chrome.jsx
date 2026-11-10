@@ -1,13 +1,37 @@
 // Header + Footer + OpenStatus
 import React from "react";
-import { HOURS, todayIndex, useNow, toMinutes, hhmm, IS_SERVER } from "../lib/hours.js";
+import { HOURS, todayIndex, useNow, toMinutes, hhmm, IS_SERVER, closedHolidayOn } from "../lib/hours.js";
 import { activeClosure, reopenMoment, fmtDate } from "./Closure.jsx";
 import { Icon } from "./Icon.jsx";
 import { hrefOf } from "../routes.js";
 
+// Eerstvolgende opening vanaf `now`. Slaat sluitingsdagen over: zondag en
+// woensdagnamiddag via HOURS, feestdagen via closedHolidayOn.
+// `nm` = de minuut van vandaag waarna de opening nog moet komen (null = heel vandaag meetellen).
+const nextOpening = (now, nm) => {
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    const h = HOURS[todayIndex(d)];
+    if (closedHolidayOn(d)) continue;
+    // beide blokken: tussen 12:00 en 14:00 gaat de deur vandaag nog open
+    for (const o of [h.open, h.open2]) {
+      const candidate = toMinutes(o);
+      if (candidate === null) continue;
+      if (i === 0 && (nm === null || candidate <= nm)) continue;
+      return { nextDay: i === 1 ? "morgen" : (i === 0 ? "vandaag" : h.day.toLowerCase()), nextTime: o };
+    }
+  }
+  return {};
+};
+
 export const computeStatus = (now) => {
   const cl = activeClosure(now);
   if (cl) return { open: false, label: "Gesloten", closure: cl, reopenAt: reopenMoment(cl) };
+  // Feestdag vóór de weekdag: op 11 november staat de deur dicht, ook al zegt
+  // de woensdagregel 08:30-12:00.
+  const feestdag = closedHolidayOn(now);
+  if (feestdag) return { open: false, label: "Gesloten", holiday: feestdag, ...nextOpening(now, null) };
   const today = HOURS[todayIndex(now)];
   const nm = now.getHours() * 60 + now.getMinutes();
   const slots = [
@@ -19,15 +43,7 @@ export const computeStatus = (now) => {
       return { open: true, label: "Nu open", until: hhmm(b), minsLeft: b - nm };
     }
   }
-  // volgende opening zoeken
-  for (let i = 0; i < 7; i++) {
-    const d = HOURS[(todayIndex(now) + i) % 7];
-    const candidate = toMinutes(d.open);
-    if (candidate !== null && (i > 0 || candidate > nm)) {
-      return { open: false, label: "Gesloten", nextDay: i === 0 ? "vandaag" : (i === 1 ? "morgen" : d.day.toLowerCase()), nextTime: d.open };
-    }
-  }
-  return { open: false, label: "Gesloten" };
+  return { open: false, label: "Gesloten", ...nextOpening(now, nm) };
 };
 
 export const OpenStatus = ({ variant = "pill" }) => {
@@ -50,13 +66,17 @@ export const OpenStatus = ({ variant = "pill" }) => {
         </span>
       );
     }
-    const label = status.open
-      ? `Open tot ${status.until}`
-      : `Gesloten · opent ${status.nextDay || ""} ${status.nextTime || ""}`.trim();
+    // Gesloten zonder meer zegt te weinig: wanneer de deur weer opengaat staat
+    // in de pil zelf, niet in een tooltip (die bestaat niet op een telefoon).
     return (
-      <span className={`status-pill ${status.open ? "open" : "closed"}`} title={label}>
+      <span className={`status-pill ${status.open ? "open" : "closed"}`}>
         <span className="status-dot"></span>
-        <span className="status-label">{status.open ? `Open tot ${status.until}` : "Gesloten"}</span>
+        <span className="status-label">
+          {status.open ? `Open tot ${status.until}` : "Gesloten"}
+          {!status.open && status.nextTime ? (
+            <span className="status-when"> · opent {status.nextDay} {status.nextTime}</span>
+          ) : null}
+        </span>
       </span>
     );
   }
@@ -76,17 +96,39 @@ export const MAPS_URL = "https://www.google.com/maps/dir/?api=1&destination=Nieu
 
 export const Header = ({ page, setPage }) => {
   const [open, setOpen] = React.useState(false);
+  const toggleRef = React.useRef(null);
+  const drawerRef = React.useRef(null);
 
-  // Close on Escape, lock scroll while open
+  // Escape sluit het menu, de focus blijft binnen het paneel zolang het open
+  // staat, en de pagina erachter scrollt niet mee.
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e) => {
+      if (e.key === "Escape") { setOpen(false); return; }
+      if (e.key !== "Tab" || !drawerRef.current) return;
+      const items = drawerRef.current.querySelectorAll("a[href], button");
+      if (!items.length) return;
+      const eerste = items[0];
+      const laatste = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === eerste || !drawerRef.current.contains(document.activeElement))) {
+        e.preventDefault();
+        laatste.focus();
+      } else if (!e.shiftKey && document.activeElement === laatste) {
+        e.preventDefault();
+        eerste.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // eerste knop in het paneel krijgt de focus, zodat de volgende Tab binnen blijft
+    const eerste = drawerRef.current && drawerRef.current.querySelector("a[href], button");
+    if (eerste) eerste.focus();
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      // na sluiten staat de focus terug op de menuknop
+      if (toggleRef.current) toggleRef.current.focus();
     };
   }, [open]);
 
@@ -97,7 +139,7 @@ export const Header = ({ page, setPage }) => {
       <header className="header">
         <div className="header-inner">
           <a className="brand" href={hrefOf("home")} onClick={(e) => { e.preventDefault(); go("home"); }} aria-label="Apotheek Vansuyt — naar onthaal">
-            <img className="brand-logo" src="/assets/logo-web.png" alt="Apotheek Vansuyt" />
+            <img className="brand-logo" src="/assets/logo-web.png" srcSet="/assets/logo-400.png 400w, /assets/logo-web.png 800w" sizes="(max-width: 420px) 126px, (max-width: 1240px) 171px, 198px" width="800" height="178" alt="Apotheek Vansuyt" />
           </a>
           <nav className="nav" aria-label="Hoofdnavigatie">
             {NAV_ITEMS.map(([id, label]) => (
@@ -118,6 +160,7 @@ export const Header = ({ page, setPage }) => {
             </a>
             <button
               className="menu-toggle"
+              ref={toggleRef}
               onClick={() => setOpen(v => !v)}
               aria-expanded={open}
               aria-controls="mobile-drawer"
@@ -131,13 +174,16 @@ export const Header = ({ page, setPage }) => {
 
       <div className={`drawer-scrim ${open ? "open" : ""}`} onClick={() => setOpen(false)} aria-hidden="true"></div>
 
+      {/* Gesloten bestaat dit paneel niet voor oog, Tab of schermlezer: de CSS
+          zet het op visibility:hidden (het `hidden`-kenmerk werd overschreven
+          door display:flex en liet negen onzichtbare tabstops staan). */}
       <div
         id="mobile-drawer"
+        ref={drawerRef}
         className={`drawer ${open ? "open" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="Menu"
-        hidden={!open}
       >
         <div className="drawer-head">
           <OpenStatus />

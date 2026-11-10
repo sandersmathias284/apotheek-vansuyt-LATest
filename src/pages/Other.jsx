@@ -14,41 +14,105 @@ const LEVERING = [
   { id: "thuis",   title: "Bezorgen aan huis",      sub: "Pervijze, Veurne, Diksmuide en Nieuwpoort." },
 ];
 
+// Belgisch telefoonnummer: 0xx xx xx xx of 04xx xx xx xx, eventueel met +32.
+// Scheidingstekens (spatie, punt, streepje, schuine streep, haakjes) mogen.
+const TEL_TEKENS = /[^0-9+(). /-]/g;
+// Dezelfde tekens als `pattern` op het veld. De haakjes, de schuine streep, de
+// punt en het streepje moeten in de tekenklasse een backslash krijgen: zonder
+// die backslash weigert Chrome het patroon ("not a valid regular expression")
+// en komt er bij elke controle een fout in de console.
+const TEL_PATROON = "[0-9+\\(\\)\\.\\/ \\-]{8,20}";
+// Belgisch (met of zonder +32), of een buitenlands nummer met landnummer:
+// klanten uit Nederland (+31) en Frankrijk (+33) wonen op een half uur rijden.
+const geldigTelefoon = (waarde) => {
+  const cijfers = waarde
+    .replace(/[^\d+]/g, "")
+    .replace(/^\+32/, "0")
+    .replace(/^0032/, "0")
+    .replace(/^00/, "+");
+  if (/^0\d{8,9}$/.test(cijfers)) return true;
+  return /^\+\d{8,15}$/.test(cijfers);
+};
+
 const ReservatiePage = () => {
   const [form, setForm] = React.useState({ naam: "", telefoon: "", email: "", rid: "", adres: "", opmerkingen: "", levering: "afhalen", bestand: "" });
-  const [state, setState] = React.useState({ status: "idle", error: "" }); // idle | busy | ok | err
-  const set = (k) => (e) => setForm((prev) => ({ ...prev, [k]: e.target.value }));
+  const [state, setState] = React.useState({ status: "idle", error: "", veld: "" }); // idle | busy | ok | err
+  // Wie een veld aanpast, is de melding aan het oplossen: de rode streep en de
+  // melding gaan dan weg. Anders blijft er een rode markering staan bij een
+  // veld dat intussen juist is ingevuld.
+  const wisFout = () => setState((prev) => (prev.status === "err" ? { status: "idle", error: "", veld: "" } : prev));
+  const set = (k) => (e) => {
+    const waarde = e.target.value;
+    setForm((prev) => ({ ...prev, [k]: waarde }));
+    wisFout();
+  };
+  // Het telefoonveld aanvaardt geen letters: ze worden geweerd bij het typen.
+  const setTelefoon = (e) => {
+    const waarde = e.target.value.replace(TEL_TEKENS, "");
+    setForm((prev) => ({ ...prev, telefoon: waarde }));
+    wisFout();
+  };
+
+  // Bij een melding springt de focus naar het veld dat aandacht nodig heeft.
+  const velden = { naam: React.useRef(null), telefoon: React.useRef(null), email: React.useRef(null), adres: React.useRef(null) };
+  const meldFout = (veld, error) => {
+    setState({ status: "err", error, veld });
+    const ref = velden[veld];
+    if (!ref || !ref.current) return;
+    // De melding staat vlak onder het veld. De focus alleen volstaat niet: op
+    // een telefoon stond ze dan nog onder de onderkant van het scherm. Daarom
+    // zetten we het veld mét zijn melding in het midden in beeld.
+    ref.current.focus({ preventScroll: true });
+    const vak = ref.current.closest(".field") || ref.current;
+    const zacht = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    requestAnimationFrame(() => vak.scrollIntoView({ block: "center", behavior: zacht ? "smooth" : "auto" }));
+  };
+  const foutBij = (veld) => (state.status === "err" && state.veld === veld
+    ? { "aria-invalid": "true", "aria-describedby": "reserv-fout" }
+    : {});
+  // De melding zelf, bij het veld waar ze over gaat.
+  const melding = (veld) => (state.status === "err" && state.veld === veld
+    ? <p className="field-error" id="reserv-fout" role="alert">{state.error}</p>
+    : null);
   const onFile = (e) => {
     const f = e.target.files[0];
     if (f && f.size > MAX_BESTAND) {
       e.target.value = "";
       setForm((prev) => ({ ...prev, bestand: "" }));
-      setState({ status: "err", error: "Dat bestand is groter dan 8 MB. Neem een kleinere foto of breng het voorschrift mee." });
+      setState({ status: "err", error: "Dat bestand is groter dan 8 MB. Neem een kleinere foto of breng het voorschrift mee.", veld: "" });
       return;
     }
     setForm((prev) => ({ ...prev, bestand: f ? f.name : "" }));
-    if (state.status === "err") setState({ status: "idle", error: "" });
+    wisFout();
   };
 
   const submit = async (e) => {
     e.preventDefault();
     if (state.status === "busy") return;
+    if (!form.naam.trim()) {
+      meldFout("naam", "Vul uw naam in, zodat we de bestelling op naam kunnen klaarzetten.");
+      return;
+    }
     if (!form.telefoon.trim() && !form.email.trim()) {
-      setState({ status: "err", error: "Vul een telefoonnummer of e-mailadres in, zodat we u kunnen bereiken." });
+      meldFout("telefoon", "Vul een telefoonnummer of e-mailadres in, zodat we u kunnen bereiken.");
+      return;
+    }
+    if (form.telefoon.trim() && !geldigTelefoon(form.telefoon)) {
+      meldFout("telefoon", "Dat telefoonnummer lijkt niet te kloppen. Bijvoorbeeld 0470 12 34 56, 051 55 52 64 of +31 6 12345678.");
       return;
     }
     if (form.levering === "thuis" && !form.adres.trim()) {
-      setState({ status: "err", error: "Vul het adres in waar we mogen leveren." });
+      meldFout("adres", "Vul het adres in waar we mogen leveren.");
       return;
     }
-    setState({ status: "busy", error: "" });
+    setState({ status: "busy", error: "", veld: "" });
     try {
       const res = await fetch("/", { method: "POST", body: new FormData(e.target) });
       if (!res.ok) throw new Error(res.status);
-      setState({ status: "ok", error: "" });
+      setState({ status: "ok", error: "", veld: "" });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      setState({ status: "err", error: "Versturen lukte niet. Probeer het opnieuw of bel ons op 051 55 52 64." });
+      setState({ status: "err", error: "Versturen lukte niet. Probeer het opnieuw of bel ons op 051 55 52 64.", veld: "" });
     }
   };
 
@@ -89,22 +153,26 @@ const ReservatiePage = () => {
           onSubmit={submit}
         >
           <input type="hidden" name="form-name" value="bestelling" />
-          <p className="sr-only"><label>Niet invullen: <input name="bot-field" tabIndex="-1" autoComplete="off" /></label></p>
+          {/* Spamval van Netlify: onzichtbaar, niet bereikbaar met Tab en niet voorgelezen. */}
+          <p className="sr-only" aria-hidden="true"><label>Niet invullen: <input name="bot-field" tabIndex="-1" autoComplete="off" /></label></p>
 
           <fieldset className="form-step">
             <legend className="mono">Stap 1 — Uw gegevens</legend>
           <div className="field">
-            <label htmlFor="f-naam">Naam &amp; voornaam</label>
-            <input id="f-naam" name="naam" autoComplete="name" required value={form.naam} onChange={set("naam")} placeholder="Maria De Cock" />
+            <label htmlFor="f-naam">Naam &amp; voornaam <span className="req">(verplicht)</span></label>
+            <input id="f-naam" name="naam" ref={velden.naam} autoComplete="name" required value={form.naam} onChange={set("naam")} placeholder="Maria De Cock" {...foutBij("naam")} />
+            {melding("naam")}
           </div>
           <div className="field-row">
             <div className="field">
               <label htmlFor="f-tel">Telefoon</label>
-              <input id="f-tel" name="telefoon" type="tel" autoComplete="tel" value={form.telefoon} onChange={set("telefoon")} placeholder="0470 12 34 56" />
+              <input id="f-tel" name="telefoon" ref={velden.telefoon} type="tel" inputMode="tel" pattern={TEL_PATROON} title="Minstens 8 cijfers, bijvoorbeeld 0470 12 34 56 of +31 6 12345678" autoComplete="tel" value={form.telefoon} onChange={setTelefoon} placeholder="0470 12 34 56" {...foutBij("telefoon")} />
+              {melding("telefoon")}
             </div>
             <div className="field">
               <label htmlFor="f-mail">E-mail</label>
-              <input id="f-mail" name="email" type="email" autoComplete="email" value={form.email} onChange={set("email")} placeholder="maria@email.be" />
+              <input id="f-mail" name="email" ref={velden.email} type="email" autoComplete="email" value={form.email} onChange={set("email")} placeholder="maria@email.be" {...foutBij("email")} />
+              {melding("email")}
             </div>
           </div>
           <p className="form-note">Een telefoonnummer of e-mailadres volstaat.</p>
@@ -143,7 +211,7 @@ const ReservatiePage = () => {
                   value={o.title}
                   className="sr-only"
                   checked={form.levering === o.id}
-                  onChange={() => setForm((prev) => ({ ...prev, levering: o.id }))}
+                  onChange={() => { setForm((prev) => ({ ...prev, levering: o.id })); wisFout(); }}
                 />
                 <span className="radio" aria-hidden="true"></span>
                 <span className="title">
@@ -157,12 +225,15 @@ const ReservatiePage = () => {
           {form.levering === "thuis" ? (
             <div className="field">
               <label htmlFor="f-adres">Leveradres</label>
-              <input id="f-adres" name="adres" autoComplete="street-address" value={form.adres} onChange={set("adres")} placeholder="Straat, nummer, gemeente" />
+              <input id="f-adres" name="adres" ref={velden.adres} autoComplete="street-address" value={form.adres} onChange={set("adres")} placeholder="Straat, nummer, gemeente" {...foutBij("adres")} />
+              {melding("adres")}
             </div>
           ) : null}
           </fieldset>
 
-          {state.status === "err" ? <p className="form-error" role="alert">{state.error}</p> : null}
+          {/* Meldingen die bij geen enkel veld horen (bestand te groot, versturen
+              mislukt) blijven hier staan, naast de knop. */}
+          {state.status === "err" && !state.veld ? <p className="form-error" role="alert">{state.error}</p> : null}
 
           <button type="submit" className="btn btn-primary" style={{ alignSelf: "flex-start", marginTop: 12 }} disabled={state.status === "busy"}>
             {state.status === "busy" ? "Bezig met versturen…" : "Bestelling versturen"}
@@ -303,12 +374,18 @@ const laadLeaflet = () => {
 
 const PervijzeMap = () => {
   const ref = React.useRef(null);
+  // Laadt de kaartdienst niet (geblokkeerd, geen net), dan komt er een melding
+  // met het adres in de plaats van een leeg vak.
+  const [kaartStuk, setKaartStuk] = React.useState(false);
 
   React.useEffect(() => {
     let map = null;
     let ro = null;
     let weg = false;
+    let geladen = false;
+    const traag = setTimeout(() => { if (!geladen && !weg) setKaartStuk(true); }, 10000);
     laadLeaflet().then((L) => {
+    geladen = true;
     if (weg || !ref.current) return;
     map = L.map(ref.current, {
       center: PHARMACY_COORDS,
@@ -316,10 +393,15 @@ const PervijzeMap = () => {
       scrollWheelZoom: false,
       zoomControl: true,
     });
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    const tegels = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
       maxZoom: 19,
     }).addTo(map);
+    // Komen ook de kaarttegels niet door, dan blijft het vak grijs: ook dan de melding.
+    let tegelsOk = false;
+    let tegelFouten = 0;
+    tegels.on("tileload", () => { tegelsOk = true; });
+    tegels.on("tileerror", () => { tegelFouten++; if (!tegelsOk && tegelFouten >= 3 && !weg) setKaartStuk(true); });
 
     L.marker(PHARMACY_COORDS, {
       icon: L.divIcon({
@@ -340,14 +422,25 @@ const PervijzeMap = () => {
 
     ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(ref.current);
-    }).catch(() => { /* zonder kaart blijft de routelink werken */ });
+    }).catch(() => { if (!weg) setKaartStuk(true); });
 
-    return () => { weg = true; if (ro) ro.disconnect(); if (map) map.remove(); };
+    return () => { weg = true; clearTimeout(traag); if (ro) ro.disconnect(); if (map) map.remove(); };
   }, []);
 
   return (
     <div className="map-block">
-      <div className="map-canvas" ref={ref} role="application" aria-label="Kaart met de ligging van Apotheek Vansuyt in Pervijze"></div>
+      <div
+        className="map-canvas"
+        ref={ref}
+        role={kaartStuk ? undefined : "application"}
+        aria-label={kaartStuk ? undefined : "Kaart met de ligging van Apotheek Vansuyt in Pervijze"}
+      ></div>
+      {kaartStuk ? (
+        <div className="map-fallback" role="status">
+          <p><strong>De kaart kan nu niet geladen worden.</strong></p>
+          <p>Apotheek Vansuyt, Nieuwpoortstraat 29, 8600 Pervijze. Gratis parking voor de deur.</p>
+        </div>
+      ) : null}
       <div className="map-actions">
         <a href={MAPS_URL} target="_blank" rel="noreferrer">Routebeschrijving <span className="sr-only">(opent in Google Maps)</span>→</a>
       </div>

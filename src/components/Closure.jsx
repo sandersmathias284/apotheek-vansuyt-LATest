@@ -1,6 +1,6 @@
 // Sluitingsperiodes (vakantie / verlof) — store + banner + countdown
 import React from "react";
-import { HOURS, useNow } from "../lib/hours.js";
+import { HOURS, useNow, closedHolidayOn } from "../lib/hours.js";
 import { hrefOf } from "../routes.js";
 
 const CLOSURE_KEY = "vansuyt.closures.v1";
@@ -104,7 +104,8 @@ const reopenMoment = (closure, list) => {
     const iso = isoOf(d);
     const inClosure = all.some(c => c.from && c.to && iso >= c.from && iso <= c.to);
     const h = HOURS[(d.getDay() + 6) % 7];
-    if (!inClosure && h && h.open) {
+    // een vakantie die eindigt op 31 december gaat niet open op 1 januari
+    if (!inClosure && !closedHolidayOn(d) && h && h.open) {
       const [hh, mm] = h.open.split(":").map(Number);
       const out = new Date(d);
       out.setHours(hh, mm, 0, 0);
