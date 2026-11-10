@@ -2,7 +2,7 @@
 import React from "react";
 import { HOURS, todayIndex, useNow, IS_SERVER, holidaysOf, upcomingHolidays, isFeestdagOpen } from "../lib/hours.js";
 import { computeStatus } from "../components/Chrome.jsx";
-import { ClosurePanel, Countdown, fmtDateShort, WACHT_URL } from "../components/Closure.jsx";
+import { ClosurePanel, Countdown, closureOp, fmtDateShort, WACHT_URL } from "../components/Closure.jsx";
 import { Icon } from "../components/Icon.jsx";
 import { Nieuws } from "../components/Nieuws.jsx";
 import { hrefOf } from "../routes.js";
@@ -28,10 +28,12 @@ export const HomePage = ({ setPage }) => {
   // Vooraf gegenereerd (zonder "nu") blijft het de vaste lijst zonder jaartal;
   // in de browser worden het de eerstvolgende dagen, mét datum.
   // Zei een bericht dat de apotheek op zo'n dag tóch open is, dan staat dat
-  // erbij in plaats van de sluitingsvermelding.
+  // erbij in plaats van de sluitingsvermelding. Loopt er een eigen
+  // sluitingsperiode over die dag, dan wint die — net als bij de status —
+  // en blijft het gewoon een sluitingsdag.
   const feestdagen = IS_SERVER
     ? holidaysOf(now.getFullYear()).filter((h) => h.gesloten).map((h) => ({ tekst: h.label, open: false }))
-    : upcomingHolidays(now, 6).map((h) => ({ tekst: h.whenLabel, open: isFeestdagOpen(h.iso) }));
+    : upcomingHolidays(now, 6).map((h) => ({ tekst: h.whenLabel, open: isFeestdagOpen(h.iso) && !closureOp(h.iso) }));
 
   // Is de apotheek vandaag dicht (feestdag of sluitingsperiode), dan mag de rij
   // "vandaag" in de urentabel niet enkel de gewone uren laten staan.

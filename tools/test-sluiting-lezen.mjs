@@ -234,6 +234,52 @@ if (!bronnen.some((b) => /from\s+["']react["']/.test(b))) {
   console.log("FOUT  O12. lezer en feestdagenlijst importeren geen react\n      react zou in de functiebundel belanden");
 }
 
+// ---------- Uit het tweede testrapport van Tess (2026-11-10) ----------
+// De zinnen staan hier letterlijk zoals zij ze gebruikte.
+console.log("\nOntkenning, heropening en rommelredenen\n");
+
+const zin = (naam, tekst, datum, from, to, soort = "gesloten") =>
+  test(naam, { titel: "", tekst, datum: datum + "T09:00:00.000Z" }, from, to, soort);
+
+// 1. Ontkenning is een sluitingszin, geen openingszin.
+zin("T1. niet open",
+  "Op 11 november zijn wij niet open.", "2026-11-07", "2026-11-11", "2026-11-11");
+zin("T2. helaas niet geopend",
+  "Helaas niet geopend op 11 november.", "2026-11-07", "2026-11-11", "2026-11-11");
+zin("T3. open met een kloktijd-bereik",
+  "Op 11 november zijn wij open van 9 tot 12 uur.", "2026-11-07", null);
+zin("T4. maar tot 12 uur open",
+  "Op 11 november zijn wij maar tot 12 uur open.", "2026-11-07", null);
+zin("T5. opendeurdag is geen openingsdag",
+  "Open dag op 1 mei: kom langs!", "2027-04-20", null);
+zin("T6. niet gesloten levert ook niets op",
+  "Wij zijn niet gesloten op 11 november.", "2026-11-07", null);
+
+// 2. Sluiting met een heropening in dezelfde zin blijft een sluiting.
+zin("T7. terug open op de dag na de sluiting",
+  "Wij zijn gesloten van 11 tot en met 15 november en zijn terug open op 16 november.",
+  "2026-11-07", "2026-11-11", "2026-11-15");
+zin("T8. daarna weer gewoon open, zonder datum",
+  "Wij zijn gesloten van 11 tot en met 15 november, daarna zijn wij weer gewoon open.",
+  "2026-11-07", "2026-11-11", "2026-11-15");
+zin("T9. heropening tussen haakjes",
+  "Gesloten van 24 december tot en met 2 januari (open op 3 januari)",
+  "2026-12-01", "2026-12-24", "2027-01-02");
+zin("T10. open de dag na een sluiting van één dag blijft onzeker",
+  "Gesloten op 1 mei, open op 2 mei.", "2027-04-20", null);
+zin("T11. zelfde dag gesloten én open",
+  "Gesloten op 1 mei, open op 1 mei.", "2027-04-20", null);
+zin("T12. heropening midden in de sluiting",
+  "Gesloten van 11 tot en met 15 november, terug open op 13 november.", "2026-11-07", null);
+zin("T13. twee losse dagen met tegengestelde betekenis",
+  "Gesloten op 1 mei en open op 11 november.", "2027-04-20", null);
+
+// 7. "Terug op ..." is de dag dat ze er weer is, niet de dag dat ze sluit.
+test("T14. titel: Vakantie! Terug op 3 januari",
+  { titel: "Vakantie! Terug op 3 januari", tekst: "", datum: "2026-12-20T09:00:00.000Z" }, null);
+test("T15. titel: met verlof, terug op 3 januari",
+  { titel: "Wij zijn met verlof. Terug op 3 januari", tekst: "", datum: "2026-12-20T09:00:00.000Z" }, null);
+
 // ---------- Korte reden (redenUitBericht) ----------
 console.log("\nKorte reden voor op de website\n");
 
@@ -265,6 +311,10 @@ reden("R7. titel zonder datumgedeelte", { titel: "Apotheek gesloten wegens ziekt
 reden("R8. titel die alleen een datumzin is", { titel: "Apotheek gesloten van 11 tot en met 15 november", tekst: "" }, "Gesloten");
 reden("R9. niets bruikbaars", { titel: "", tekst: "Gesloten van 1 tot 3 december." }, "Gesloten");
 reden("R10. eigen titel blijft staan", { titel: "Kerstsluiting", tekst: "Gesloten van 24 december tot en met 2 januari." }, "Kerstsluiting");
+
+reden("R13. punten uit t.e.m. komen niet in de reden", { titel: "Wij zijn gesloten van 1 dec. t.e.m. 3 dec.", tekst: "" }, "Gesloten");
+reden("R14. heropeningswoord is geen reden", { titel: "Gesloten. Terug op 3 januari.", tekst: "" }, "Gesloten");
+reden("R15. brokstuk uit een andere zin in de titel", { titel: "Wij zijn gesloten op zondag; de actie loopt van 21 tot en met 29 november.", tekst: "" }, "Gesloten");
 
 const lang = redenUitBericht({
   titel: "Belangrijk nieuws voor al onze klanten uit Pervijze en omstreken over de komende weken",

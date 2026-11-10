@@ -1929,6 +1929,10 @@ html.js noscript{display:none !important}
 /* Leeg kader: niets te zien, maar het blijft in de pagina staan zodat een
    schermlezer een voorstel hoort dat later binnenkomt. */
 .voorstellen:empty { margin: 0; }
+/* De kop staat vast bovenaan (72 px + lijn). Zonder deze marge belandt het
+   kader er precies onder zodra de focus of de link "Naar het voorstel" het in
+   beeld brengt, en leest ze de bevestiging niet. */
+.voorstellen, .bh-feestdagen { scroll-margin-top: 88px; }
 /* Voorstel van de soort "open": de apotheek is die feestdag tóch open. Groen
    in plaats van kleirood, zodat de twee soorten niet te verwarren zijn. */
 .voorstel-open { border-color: var(--sage); }
@@ -1940,6 +1944,8 @@ html.js noscript{display:none !important}
 .bh-feestdagen ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .bh-feestdagen li { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-left: 2px solid var(--sage); background: var(--paper-2); padding: 10px 12px; font-size: 14px; }
 .bh-feestdagen li > span { min-width: 0; }
+/* Loopt er een eigen sluiting over die dag, dan wint die: geen groen randje. */
+.bh-feestdagen li.dicht { border-left-color: var(--rule); color: var(--ink-3); }
 .bh-feestdagen button { background: none; border: 1px solid var(--ink); border-radius: 999px; padding: 9px 16px; font-size: 13px; min-height: 44px; }
 .bh-feestdagen button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
 .bh-feestdagen button:disabled { opacity: .6; cursor: progress; }

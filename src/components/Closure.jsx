@@ -115,6 +115,14 @@ const activeClosure = (now, list) => {
   return all.find(c => c.from && c.to && now >= dayStart(c.from) && now <= dayEnd(c.to)) || null;
 };
 
+// De sluitingsperiode die over een datum (ISO) loopt, of null. Haar eigen
+// sluiting gaat voor op een feestdag die een bericht open verklaarde, dus
+// hiermee kunnen de teksten eromheen dezelfde rangorde volgen als de status.
+const closureOp = (iso, list) => {
+  const all = list || readClosures();
+  return all.find((c) => c.from && c.to && iso >= c.from && iso <= c.to) || null;
+};
+
 // Volgende geplande sluiting (na vandaag)
 const upcomingClosures = (now, list) => {
   const all = list || readClosures();
@@ -321,7 +329,7 @@ export {
   CLOSURE_KEY, FEESTDAG_OPEN_KEY, WACHT_URL, CLOSURE_API, remoteState, checkCode,
   readFeestdagOpen, cacheFeestdagOpen, useFeestdagOpen,
   readClosures, writeClosures, cacheClosures, fetchClosures, pushClosures, useClosures,
-  activeClosure, upcomingClosures, reopenMoment,
+  activeClosure, closureOp, upcomingClosures, reopenMoment,
   dayStart, dayEnd, isoOf, fmtDate, fmtDateShort, splitDuration,
   Countdown, ClosureBar, ClosurePanel,
 };

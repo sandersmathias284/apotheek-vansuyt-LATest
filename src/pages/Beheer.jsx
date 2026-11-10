@@ -1,7 +1,7 @@
 // Beheer — beveiligde pagina om sluitingsperiodes te beheren
 import React from "react";
 import { useNow } from "../lib/hours.js";
-import { useClosures, activeClosure, writeClosures, pushClosures, fetchClosures, remoteState, checkCode, isoOf, fmtDate, dayStart, useFeestdagOpen, WACHT_URL } from "../components/Closure.jsx";
+import { useClosures, activeClosure, closureOp, writeClosures, pushClosures, fetchClosures, remoteState, checkCode, isoOf, fmtDate, dayStart, useFeestdagOpen, WACHT_URL } from "../components/Closure.jsx";
 import { holidayOn } from "../lib/feestdagen.js";
 import { VaccinatieAgenda } from "./Catalog.jsx";
 import { hrefOf } from "../routes.js";
@@ -178,8 +178,13 @@ const BeheerPanel = ({ setPage, onLock }) => {
             fetchClosures();
             say(melding);
             // Ook een open-dag vraagt iets van de telefoon: dan moet de
-            // doorschakeling juist uit. VoysHerinnering draait de tekst om.
-            if (!dubbel) setVoysHerinnering({ periode: { from: v.from, to: v.to }, openDag: v.soort === "open" });
+            // doorschakeling juist uit. Ligt die dag binnen een eigen sluiting,
+            // dan blijft de apotheek dicht en moet er aan de telefoon niets
+            // veranderen — dan dus geen herinnering.
+            const openDag = v.soort === "open";
+            if (!dubbel && !(openDag && closureOp(v.from))) {
+              setVoysHerinnering({ periode: { from: v.from, to: v.to }, soort: openDag ? "open" : "sluiting" });
+            }
           }}
         />
 
@@ -258,7 +263,13 @@ const BeheerPanel = ({ setPage, onLock }) => {
                 })}
               </ul>
             )}
-            <FeestdagenOpen onKlaar={(m) => say(m)} />
+            <FeestdagenOpen
+              onKlaar={(m, dag) => {
+                say(m);
+                // De telefoon moet weer in de feestdagstand: doorschakeling aan.
+                if (dag) setVoysHerinnering({ periode: { from: dag, to: dag }, soort: "terug" });
+              }}
+            />
             <aside className="callout" style={{ marginTop: 24 }}>
               <span className="mono">Zo werkt het</span>
               <h3>Automatisch aan en uit</h3>
@@ -297,13 +308,17 @@ const BeheerPanel = ({ setPage, onLock }) => {
 // De telefoon staat los van de website: na elke bewaarde periode een herinnering.
 const VOYS_URL = "https://www.voys.be/";
 
-const VoysHerinnering = ({ periode, openDag, onSluit }) => (
+const VoysHerinnering = ({ periode, soort, onSluit }) => (
   <aside className="voys-herinnering" role="status" aria-live="polite">
     <div>
       <span className="mono">Telefoon · Voys</span>
       <h3>Vergeet de telefoon niet</h3>
       <p>
-        {openDag && periode
+        {soort === "terug" && periode
+          // Teruggedraaid: de dag is weer een gewone feestdag, dus de
+          // doorschakeling moet weer aan staan.
+          ? <>Zet in Voys de doorschakeling weer <strong>aan</strong> voor <strong>{fmtDate(periode.from)}</strong>: die feestdag is de apotheek toch gesloten.</>
+          : soort === "open" && periode
           // Op een feestdag staat de telefoon normaal doorgeschakeld naar de
           // wachtdienst. Bent u die dag open, dan moet die doorschakeling uit,
           // anders sturen bellers naar een andere apotheek terwijl u er staat.
@@ -431,7 +446,10 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
         if (isOpen(v)) {
           setMelding(dubbel
             ? "Die dag stond al als open."
-            : "Feestdag aangepast. De apotheek staat die dag nu als open op de website.");
+            : closureOp(v.from)
+              // Haar eigen sluiting gaat voor: op de website verandert er niets.
+              ? "Genoteerd. Zolang uw sluitingsperiode over die dag loopt, blijft de website gesloten tonen."
+              : "Feestdag aangepast. De apotheek staat die dag nu als open op de website.");
         } else {
           setMelding(dubbel
             ? "Die periode stond al in de lijst — er is niets dubbel bijgekomen."
@@ -462,9 +480,12 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
             <p className="voorstel-bron">{bronRegel(v)} {v.berichtTitel ? <strong>{v.berichtTitel}</strong> : <em>bericht zonder titel</em>}</p>
             <h2>{periodeZin(v)}</h2>
             <p className="voorstel-uitleg">
-              {isOpen(v)
-                ? "De website toont die dag nu nog Gesloten, omdat het een feestdag is. Toevoegen laat de gewone uren gelden. Een sluitingsperiode die u zelf ingaf blijft wel voorgaan."
-                : "Dit staat nog niet op de website. Toevoegen zet de sluiting meteen online."}
+              {!isOpen(v)
+                ? "Dit staat nog niet op de website. Toevoegen zet de sluiting meteen online."
+                : closureOp(v.from)
+                  // Haar eigen sluiting gaat voor: dan verandert er niets op de site.
+                  ? "U hebt zelf een sluitingsperiode over die dag. Die gaat voor, dus de website blijft die dag gesloten tonen — ook na Toevoegen."
+                  : "De website toont die dag nu nog Gesloten, omdat het een feestdag is. Toevoegen laat de gewone uren gelden. Een sluitingsperiode die u zelf ingaf blijft wel voorgaan."}
             </p>
             {isOpen(v) ? null : (
               <label className="bh-field voorstel-reden">
@@ -496,6 +517,12 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
   );
 };
 
+// De naam van de feestdag op een datum ("Wapenstilstand").
+const naamVan = (iso) => {
+  const f = holidayOn(dayStart(iso));
+  return f ? f.name : "Feestdag";
+};
+
 // ---------- Feestdagen waarop de apotheek toch open is ----------
 // Wat hier staat, kwam uit een nieuwsbericht en is door haarzelf bevestigd.
 // Eén verkeerde tik mag niet betekenen dat een feestdag voorgoed open staat,
@@ -505,6 +532,8 @@ const FeestdagenOpen = ({ onKlaar }) => {
   const dagen = useFeestdagOpen();
   const [bezig, setBezig] = React.useState("");
   const [fout, setFout] = React.useState("");
+  const [melding, setMelding] = React.useState("");
+  const kader = React.useRef(null);
 
   const terug = async (dag) => {
     setBezig(dag);
@@ -518,31 +547,46 @@ const FeestdagenOpen = ({ onKlaar }) => {
         body: JSON.stringify({ actie: "feestdag-terug" }),
       });
       data = await res.json().catch(() => null);
+      if (res.status === 404) {
+        // Elders al teruggedraaid: de rij hoort weg, niet blijven falen.
+        setMelding("Die dag stond al niet meer als open.");
+        await fetchClosures();
+        return;
+      }
       if (!res.ok) throw new Error("niet bewaard");
       await fetchClosures();
-      if (onKlaar) onKlaar((data && data.melding) || "De feestdag geldt weer.");
+      setMelding(`${naamVan(dag)} ${fmtDate(dag)} is weer een gewone sluitingsdag.`);
+      if (onKlaar) onKlaar((data && data.melding) || "De feestdag geldt weer.", dag);
     } catch (e) {
       setFout(foutTekst(res && res.status ? res : null, data));
     } finally {
       setBezig("");
+      // De gedrukte knop verdwijnt: focus naar het kader met de melding.
+      if (kader.current) kader.current.focus();
     }
   };
 
-  if (!dagen.length) return null;
+  if (!dagen.length && !melding) return null;
 
   return (
-    <div className="bh-feestdagen">
-      <h3>Feestdagen waarop u toch open bent</h3>
-      <p className="bh-feestdagen-lede">
-        Gelezen uit een nieuwsbericht en door u bevestigd. De website toont op die dagen gewoon de openingsuren.
-      </p>
+    <div className="bh-feestdagen" ref={kader} tabIndex={-1} aria-live="polite">
+      {dagen.length ? (
+        <>
+          <h3>Feestdagen waarop u toch open bent</h3>
+          <p className="bh-feestdagen-lede">
+            Gelezen uit een nieuwsbericht en door u bevestigd. De website toont op die dagen gewoon de openingsuren.
+          </p>
+        </>
+      ) : null}
       <ul>
         {dagen.map((d) => {
-          const f = holidayOn(dayStart(d));
-          const naam = f ? f.name : "Feestdag";
+          const naam = naamVan(d);
+          // Loopt er een eigen sluitingsperiode over die dag, dan wint die —
+          // dezelfde rangorde als de status op de website.
+          const dicht = closureOp(d);
           return (
-            <li key={d}>
-              <span><strong>{naam}</strong> {fmtDate(d)} — wij zijn open</span>
+            <li key={d} className={dicht ? "dicht" : ""}>
+              <span><strong>{naam}</strong> {fmtDate(d)} — {dicht ? "maar u bent dan gesloten (eigen sluitingsperiode)" : "wij zijn open"}</span>
               <button type="button" disabled={bezig === d} onClick={() => terug(d)}>
                 {bezig === d ? "Bezig…" : "Terugdraaien"}<span className="sr-only"> — {naam} {fmtDate(d)}</span>
               </button>
@@ -550,6 +594,7 @@ const FeestdagenOpen = ({ onKlaar }) => {
           );
         })}
       </ul>
+      {melding ? <p className="voorstel-melding">{melding}</p> : null}
       {fout ? <p className="field-error" role="alert">{fout}</p> : null}
     </div>
   );
