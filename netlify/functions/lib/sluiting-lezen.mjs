@@ -45,10 +45,16 @@ const OPENWOORD = /\b(?:open|geopend|openen)\b/;
 // "niet open", "helaas niet geopend", "nooit open": dat is een sluitingszin.
 // Zonder deze regel leest "op 11 november zijn wij niet open" als een open-dag,
 // precies het omgekeerde van wat er staat.
-const NIET_OPEN = /\b(?:niet|nooit|geen)\b(?:\s+\w+){0,3}\s+(?:open|geopend|openen)\b/;
-// "niet gesloten" is het spiegelbeeld. Daar maken we niets van: een omgekeerde
-// lezing is erger dan geen voorstel.
-const NIET_DICHT = /\b(?:niet|nooit|geen)\b(?:\s+\w+){0,3}\s+(?:gesloten|dicht|sluiten)\b/;
+const NIET = "(?:niet|nooit|geen)";
+const OPEN_KERN = "(?:open|geopend|openen)";
+const SLUIT_KERN = "(?:gesloten|sluiting\\w*|sluiten|sluit|verlof\\w*|vakantie\\w*|brug\\w*|dicht)";
+const NIET_OPEN = new RegExp(`\\b${NIET}\\b(?:\\s+\\w+){0,2}\\s+${OPEN_KERN}\\b`, "g");
+// Het spiegelbeeld: "geen sluiting", "wij sluiten niet", "niet met vakantie".
+// Daar maken we niets van — een omgekeerde lezing is erger dan geen voorstel.
+// Het ontkennende woord kan er vóór of ná staan.
+const NIET_DICHT = new RegExp(
+  `\\b${NIET}\\b(?:\\s+\\w+){0,2}\\s+${SLUIT_KERN}\\b|\\b${SLUIT_KERN}\\b(?:\\s+\\w+){0,2}\\s+${NIET}\\b`,
+);
 // Een opendeurdag is geen openingsuur.
 const OPEN_DAG = /\bopen\s*deur\w*|\bopen\s*dag(?:en)?\b/g;
 // "open van 9 tot 12 uur", "tot 12 uur open": dat gaat over uren, niet over
@@ -73,8 +79,14 @@ const RE_CIJFERS = new RegExp(
 const RE_WOORDEN = new RegExp(
   `van(?:af)?\\s+${START}(\\d{1,2})(?:\\s+(${MAAND})\\.?)?(?:\\s+(\\d{4}))?\\s+${TOT}\\s+(\\d{1,2})\\s+(${MAAND})\\.?(?:\\s+(\\d{4}))?`,
 );
-// op 20 en 21 november — twee losse dagen na elkaar zijn samen één periode.
-const RE_EN = new RegExp(`(?:op\\s+)?${START}(\\d{1,2})\\s+en\\s+(\\d{1,2})\\s+(${MAAND})\\.?(?:\\s+(\\d{4}))?`);
+// Een opsomming: "24 en 31 december", "12, 13 en 14 november", "6 mei en
+// 7 mei", "12 + 13 november". Welke dagen dat zijn, wordt hieronder uit de
+// gevonden tekst gehaald; aaneensluitende dagen worden één periode, de rest
+// blijft apart. "X en Y" is dus géén bereik meer op zich.
+const RE_OPSOMMING = new RegExp(
+  `(?:op\\s+)?${START}\\d{1,2}(?:\\s+(?:${MAAND})\\.?)?(?:\\s*(?:,|\\+|&|en)\\s*(?:op\\s+)?\\d{1,2}(?:\\s+(?:${MAAND})\\.?)?)+(?:\\s+\\d{4})?`,
+);
+const RE_TOKEN = new RegExp(`(?<!\\d)(\\d{1,2})(?!\\d)(?:\\s+(${MAAND})\\.?)?`, "g");
 // op 11 november  ·  11 november 2026
 const RE_EEN_WOORD = new RegExp(`(?:op\\s+)?${START}(\\d{1,2})\\s+(${MAAND})\\.?(?:\\s+(\\d{4}))?`);
 // op 24/12 — alleen met "op" ervoor, anders leest ze te veel mee.
@@ -85,10 +97,17 @@ const UREN = /^\s*(?:uur|u\b|h\b)/;
 // Een losse datum die aan "tot", "t/m", "vanaf" of "van" hangt is een half
 // bereik: het andere einde zou een gok zijn, en een gok is erger dan niets.
 const HALF = /\b(?:tot en met|tot|t\/m|tem|vanaf|van)\s+$/;
-// "om 17u", "om 8u30": een deel van een dag, dus geen sluitingsdag.
-const KLOKTIJD = /\bom\s+\d{1,2}(?:[.:u]\d{2}\b|\s*(?:uur|u|h)\b)/;
-// "wij sluiten vroeger": ook een deel van een dag.
-const DEEL_VAN_DAG = /\b(?:vroeger|later)\b/;
+// Een zin die over een stuk van de dag gaat, levert niets op: dit model kent
+// alleen hele dagen, dus er valt niets eerlijks te schrijven.
+// "om 17u", "9:00", "van 12u tot 14u", "tot 12h".
+const KLOKTIJD = /\bom\s+\d{1,2}\b|\b\d{1,2}\s*(?:uur|u|h)\b|\b\d{1,2}[.:u]\d{2}\b/;
+// "'s namiddags", "in de voormiddag", "tussen de middag", "woensdagnamiddag"
+// (zonder \b ervoor, anders mist hij het aan een weekdag vastgeplakte woord).
+const DEEL_VAN_DAG = /\b(?:vroeger|later|halve dag|halve dagen)\b|(?:voor|na)?middag\w*|ochtend\w*|avond\w*|'s\s*(?:ochtends|middags|avonds|namiddags|voormiddags)/;
+// "vanaf 9 open", "tot 12 gesloten": een kaal getal na vanaf/tot is een uur,
+// geen datum — tenzij er een maand of een tweede getal achter staat.
+const UURACHTIG = new RegExp(`\\b(?:vanaf|tot)\\s+\\d{1,2}(?!\\s*[/-]?\\d)(?!\\s+(?:${MAAND}))\\b`);
+const overDeelVanDag = (z) => DEEL_VAN_DAG.test(z) || KLOKTIJD.test(z) || UURACHTIG.test(z);
 
 const DAG = 86400000;
 
@@ -162,117 +181,188 @@ export const feestdagenIn = (from, to) => {
 // feestdag duurt één dag.
 const MAX_OPEN_DAGEN = 14;
 
-// Zoekt de eerste periode in een stuk zin, zonder te weten of het om sluiten of
-// openen gaat. Geeft { from, to, eenDag } of null.
-const periodeIn = (z, basis) => {
+// ---------- datums uit een zin halen ----------
+
+const dagNa = (iso) => isoVan(Date.parse(`${iso}T00:00:00Z`) + DAG);
+const dagVoor = (iso) => isoVan(Date.parse(`${iso}T00:00:00Z`) - DAG);
+const dagenTussen = (van, tot) => (Date.parse(`${tot}T00:00:00Z`) - Date.parse(`${van}T00:00:00Z`)) / DAG;
+
+// De losse datums uit een opsomming ("24 en 31 december", "6 mei en 7 mei",
+// "12, 13 en 14 november"). Een dag zonder maand leent die van de eerstvolgende
+// dag die er wél een heeft; staat die er niet, dan van de vorige.
+const datumsUitOpsomming = (tekst, basis) => {
+  const jaarM = /(?:^|\s)(\d{4})\s*$/.exec(tekst);
+  const kaal = jaarM ? tekst.slice(0, jaarM.index) : tekst;
+  const jaar = jaarM ? +jaarM[1] : null;
+
+  const tokens = [];
+  RE_TOKEN.lastIndex = 0;
+  let m;
+  while ((m = RE_TOKEN.exec(kaal)) !== null) tokens.push({ dag: +m[1], maand: maandVan(m[2]) });
+  if (tokens.length < 2) return [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].maand) continue;
+    const later = tokens.slice(i + 1).find((t) => t.maand);
+    const eerder = [...tokens.slice(0, i)].reverse().find((t) => t.maand);
+    tokens[i].maand = (later || eerder || {}).maand || null;
+  }
+
+  const uit = [];
+  for (const t of tokens) {
+    if (!t.maand) return []; // zonder maand valt er niets te lezen
+    const hit = bereik(basis, { ...t, jaar }, { ...t, jaar });
+    if (!hit) return []; // één onmogelijke of al voorbije datum: de hele opsomming niet
+    uit.push(hit.from);
+  }
+  return uit;
+};
+
+// Aaneensluitende dagen worden één periode, de rest blijft apart.
+const groepeer = (isos) => {
+  const groepen = [];
+  for (const iso of [...new Set(isos)].sort()) {
+    const laatste = groepen[groepen.length - 1];
+    if (laatste && dagNa(laatste.to) === iso) laatste.to = iso;
+    else groepen.push({ from: iso, to: iso });
+  }
+  return groepen;
+};
+
+// Zoekt de periodes in een stuk zin, zonder te weten of het om sluiten of
+// openen gaat. Geeft een lijst { from, to }, met `index` (waar in de zin) en
+// `eenDag` op de eerste.
+const periodesIn = (z, basis) => {
   const na = (m) => z.slice(m.index + m[0].length);
   const voor = (m) => z.slice(0, m.index);
-  const uit = (hit, eenDag) => (hit ? { ...hit, eenDag } : null);
+  const een = (hit, m, eenDag) => (hit ? [{ ...hit, index: m.index, eenDag }] : []);
 
-  // Staat er een bereik in de zin, dan geldt dát bereik. Wordt het geweigerd
-  // (einde vóór begin, of langer dan 60 dagen), dan levert de zin niets op —
-  // terugvallen op één van de twee datums zou een verkeerde periode voorstellen.
+  // Een expliciet bereik gaat voor. Wordt het geweigerd (einde vóór begin, of
+  // langer dan 60 dagen), dan levert de zin niets op — terugvallen op één van
+  // de twee datums zou een verkeerde periode voorstellen.
   let m = RE_CIJFERS.exec(z);
   if (m && !UREN.test(na(m))) {
-    return uit(bereik(basis,
+    return een(bereik(basis,
       { dag: +m[1], maand: +m[2], jaar: jaarVan(m[3]) },
-      { dag: +m[4], maand: +m[5], jaar: jaarVan(m[6]) }), false);
+      { dag: +m[4], maand: +m[5], jaar: jaarVan(m[6]) }), m, false);
   }
 
   m = RE_WOORDEN.exec(z);
   if (m && !UREN.test(na(m))) {
-    return uit(bereik(basis,
+    return een(bereik(basis,
       { dag: +m[1], maand: maandVan(m[2]), jaar: jaarVan(m[3]) },
-      { dag: +m[4], maand: maandVan(m[5]), jaar: jaarVan(m[6]) }), false);
+      { dag: +m[4], maand: maandVan(m[5]), jaar: jaarVan(m[6]) }), m, false);
   }
 
-  // "op 20 en 21 november" is één periode van twee dagen, geen losse datum.
-  m = RE_EN.exec(z);
+  // Opsomming: "24 en 31 december" zijn twee dagen, geen bereik van acht.
+  m = RE_OPSOMMING.exec(z);
   if (m && !UREN.test(na(m)) && !HALF.test(voor(m))) {
-    const maand = maandVan(m[3]);
-    const jaar = jaarVan(m[4]);
-    return uit(bereik(basis, { dag: +m[1], maand, jaar }, { dag: +m[2], maand, jaar }), false);
+    const groepen = groepeer(datumsUitOpsomming(m[0], basis));
+    if (groepen.length) {
+      return groepen.map((g, i) => ({ ...g, index: m.index, eenDag: i === 0 && g.from === g.to && groepen.length === 1 }));
+    }
+    return [];
   }
-
-  // Eén datum. Niet als ze aan "tot"/"vanaf" hangt (half bereik) en niet als de
-  // zin over een deel van de dag gaat ("sluiten vroeger om 17u").
-  if (KLOKTIJD.test(z) || DEEL_VAN_DAG.test(z)) return null;
 
   m = RE_EEN_WOORD.exec(z);
   if (m && !UREN.test(na(m))) {
-    if (HALF.test(voor(m))) return null;
-    const een = { dag: +m[1], maand: maandVan(m[2]), jaar: jaarVan(m[3]) };
-    const hit = uit(bereik(basis, een, een), true);
-    if (hit) return hit;
+    if (HALF.test(voor(m))) return [];
+    const d = { dag: +m[1], maand: maandVan(m[2]), jaar: jaarVan(m[3]) };
+    const hit = een(bereik(basis, d, d), m, true);
+    if (hit.length) return hit;
   }
 
   m = RE_EEN_CIJFER.exec(z);
   if (m && !UREN.test(na(m))) {
-    if (HALF.test(voor(m))) return null;
-    const een = { dag: +m[1], maand: +m[2], jaar: jaarVan(m[3]) };
-    const hit = uit(bereik(basis, een, een), true);
-    if (hit) return hit;
+    if (HALF.test(voor(m))) return [];
+    const d = { dag: +m[1], maand: +m[2], jaar: jaarVan(m[3]) };
+    const hit = een(bereik(basis, d, d), m, true);
+    if (hit.length) return hit;
   }
 
-  return null;
+  return [];
 };
 
-const dagNa = (iso) => isoVan(Date.parse(`${iso}T00:00:00Z`) + DAG);
+// Hoe ver staat de datum van het dichtstbijzijnde woord uit `re`?
+const afstandTot = (z, idx, bron) => {
+  let best = Infinity;
+  for (const m of z.matchAll(new RegExp(bron, "g"))) best = Math.min(best, Math.abs(m.index - idx));
+  return best;
+};
 
-// Zoekt in één zin een periode. Geeft { soort, from, to } of null.
-const periodeInZin = (zin, basis) => {
+// Zoekt in één zin de lezingen. Geeft een lijst { soort, from, to }, meestal
+// leeg of met één element; een opsomming van losse dagen kan er meer geven.
+const lezingenInZin = (zin, basis) => {
   const z = zin.toLowerCase().replace(WEEKDAGEN, " ").replace(OPEN_DAG, " ").replace(/\s+/g, " ").trim();
 
-  // "niet gesloten": geen gok, in geen van beide richtingen.
-  if (NIET_DICHT.test(z)) return null;
-  const ontkend = NIET_OPEN.test(z);
-  // "niet open" telt als sluitingswoord, niet als openingswoord.
+  // "geen sluiting", "wij sluiten niet", "niet met vakantie": van een ontkend
+  // sluitingswoord maken we niets. Nooit het omgekeerde van wat er staat.
+  if (NIET_DICHT.test(z)) return [];
+
+  // "niet open" telt als sluitingswoord. Staat er in dezelfde zin óók een
+  // gewone "open" ("open van 9 tot 13 november, niet open op 11 november"),
+  // dan is niet te zeggen welke datum bij welke hoort: dan niets.
+  const openKeren = (z.match(new RegExp(OPEN_KERN.replace(/^\(\?:/, "(?:"), "g")) || []).length;
+  const ontkendeKeren = (z.match(NIET_OPEN) || []).length;
+  if (ontkendeKeren && openKeren > ontkendeKeren) return [];
+  const ontkend = ontkendeKeren > 0;
+
   const sluit = SLUITWOORD.test(z) || ontkend;
   const opent = OPENWOORD.test(z) && !ontkend;
-  if (!sluit && !opent) return null;
+  if (!sluit && !opent) return [];
 
-  // Beide betekenissen in één zin. Niet weigeren, maar kijken naar de vorm:
-  // een openingsdatum die op of net na het einde van de sluiting valt is een
-  // heropening ("gesloten van 11 tot en met 15 november en terug open op 16
-  // november"). Overlappen de twee, dan spreken ze elkaar tegen en lezen we
-  // niets.
+  // Een zin over een stuk van de dag levert niets op.
+  if (overDeelVanDag(z)) return [];
+
+  // ---- beide betekenissen in één zin ----
   if (sluit && opent) {
-    const dicht = periodeIn(z, basis);
-    if (!dicht) return null;
+    const lijst = periodesIn(z, basis);
+    if (!lijst.length) return [];
+    const dicht = lijst[0];
+    // Hoort de datum bij het sluitings- of bij het openingsgedeelte? "Na de
+    // vakantie zijn wij op 4 januari terug open" hoort bij het openen, dus
+    // lezen we niets. Zo beslist de betekenis en niet de woordvolgorde.
+    if (afstandTot(z, dicht.index, SLUITWOORD.source) > afstandTot(z, dicht.index, OPENWOORD.source)) return [];
+
     const vanaf = z.search(OPENWOORD);
     const openDeel = vanaf >= 0 ? z.slice(vanaf) : "";
-    const open = openDeel ? periodeIn(openDeel, basis) : null;
-    if (open && open.from <= dicht.to && open.to >= dicht.from) return null; // zelfde dagen, andere betekenis
-    // "daarna zijn wij weer gewoon open" zet het woord vóór "open", dus kijken
-    // we naar de hele zin.
-    const heropening = HEROPENING.test(z)
-      // "(open op 3 januari)" na een bereik dat de dag ervoor eindigt: ook een
-      // heropening. Na een sluiting van één dag is dat te onzeker.
-      || (!!open && !dicht.eenDag && open.from === dagNa(dicht.to));
-    if (!heropening) return null;
-    return { soort: "gesloten", from: dicht.from, to: dicht.to };
+    const open = (openDeel ? periodesIn(openDeel, basis) : [])[0] || null;
+    // Zelfde dagen met tegengestelde betekenis: tegenstrijdig, dus niets.
+    if (open && open.from <= dicht.to && open.to >= dicht.from) return [];
+
+    const heropening = HEROPENING.test(z);
+    if (!heropening) {
+      // Zonder heropeningstaal telt alleen de dag-na-regel na een bereik.
+      if (open && !dicht.eenDag && open.from === dagNa(dicht.to)) return [{ soort: "gesloten", from: dicht.from, to: dicht.to }];
+      return [];
+    }
+    if (dicht.eenDag) {
+      // "Gesloten op 24 december, terug open op 4 januari": dicht tot de dag
+      // vóór de heropening. Zonder tweede datum weten we het einde niet.
+      if (!open) return [];
+      const to = dagVoor(open.from);
+      if (dagenTussen(dicht.from, to) < 0 || dagenTussen(dicht.from, to) > 60) return [];
+      return [{ soort: "gesloten", from: dicht.from, to }];
+    }
+    return lijst.map((g) => ({ soort: "gesloten", from: g.from, to: g.to }));
   }
 
+  // ---- alleen sluiten ----
   if (sluit) {
-    const hit = periodeIn(z, basis);
-    if (!hit) return null;
+    const lijst = periodesIn(z, basis);
+    if (!lijst.length) return [];
     // "Vakantie! Terug op 3 januari": die ene datum is de dag dat ze terug is,
-    // niet de dag dat ze sluit. Eén losse datum naast heropeningstaal lezen we
-    // dus niet.
-    if (hit.eenDag && HEROPENING.test(z)) return null;
-    return { soort: "gesloten", from: hit.from, to: hit.to };
+    // niet de dag dat ze sluit.
+    if (lijst.length === 1 && lijst[0].eenDag && HEROPENING.test(z)) return [];
+    return lijst.map((g) => ({ soort: "gesloten", from: g.from, to: g.to }));
   }
 
-  // Open. Een zin over uren ("open van 9 tot 12 uur") gaat niet over dagen.
-  if (UURZIN.test(z)) return null;
-  const hit = periodeIn(z, basis);
-  if (!hit) return null;
+  // ---- alleen openen ----
   // Een open-lezing die geen enkele feestdag raakt is zinloos — dan is de
   // apotheek sowieso open. Zo wordt "wij zijn open op maandag 4 mei" niets.
-  if ((Date.parse(`${hit.to}T00:00:00Z`) - Date.parse(`${hit.from}T00:00:00Z`)) / DAG > MAX_OPEN_DAGEN) return null;
-  const feestdagen = feestdagenIn(hit.from, hit.to);
-  if (!feestdagen.length) return null;
-  return { soort: "open", from: hit.from, to: hit.to, feestdagen };
+  return periodesIn(z, basis)
+    .filter((g) => dagenTussen(g.from, g.to) <= MAX_OPEN_DAGEN && feestdagenIn(g.from, g.to).length)
+    .map((g) => ({ soort: "open", from: g.from, to: g.to, feestdagen: feestdagenIn(g.from, g.to) }));
 };
 
 // Een punt na een maandafkorting of in "t.e.m." mag de zin niet doormidden
@@ -280,7 +370,11 @@ const periodeInZin = (zin, basis) => {
 // hoofdletter blijft wél een zinseinde, zodat twee zinnen twee zinnen blijven.
 const TEM_PUNTEN = /\bt\.\s*e\.\s*m\.?/gi;
 const AFKORTING = /\b([Jj]an|[Ff]eb|[Mm]rt|[Aa]pr|[Jj]un|[Jj]ul|[Aa]ug|[Ss]ept?|[Oo]kt|[Nn]ov|[Dd]ec)\.(?=\s*[a-z0-9])/g;
-const ontkort = (s) => String(s || "").replace(TEM_PUNTEN, "tem").replace(AFKORTING, "$1");
+// "9.00 tot 12.00 uur" knipte de zin in stukken, waardoor het eerste stuk
+// ("... open van 9") als een hele dag werd gelezen. De punt wordt een u, zodat
+// het een uur blijft en de zin heel.
+const KLOKPUNT = /\b(\d{1,2})\.(\d{2})\b/g;
+const ontkort = (s) => String(s || "").replace(TEM_PUNTEN, "tem").replace(KLOKPUNT, "$1u$2").replace(AFKORTING, "$1");
 
 // Titel en tekst in zinnen. De titel is één eigen zin.
 const inZinnen = (titel, tekst) =>
@@ -305,7 +399,13 @@ const FEESTDAGEN = [
 const MAAND_LOS = new RegExp(`\\b(?:${MAAND})\\b\\.?`, "gi");
 const WEEKDAG_LOS = /\b(?:maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)s?\b/gi;
 const VERBINDERS = /\b(?:van|vanaf|tot en met|tot|t\/m|tem|op|en|de|het|een)\b/gi;
-const WEG_UIT_TITEL = /\b(?:apotheek|gesloten|sluiting|wij|zijn|onze|uw|u|terug|opnieuw|weer|daarna|nadien|ook|nog|dus)\b/gi;
+const WEG_UIT_TITEL = /\b(?:apotheek|gesloten|sluiting|sluiten|dicht|open|geopend|wij|zijn|onze|uw|u|terug|opnieuw|weer|daarna|nadien|ook|nog|dus|niet|geen|meer|toch|enkel|slechts|maar|belangrijk|nieuw|nieuws|update|mededeling|opgelet|let|nader|order|wegens|omwille|door)\b/gi;
+// Woorden die een stuk van de dag aanduiden horen ook niet in een reden
+// ("Woensdagnamiddag" voor een hele dag).
+const DEEL_UIT_TITEL = /(?:voor|na)?middag\w*|ochtend\w*|avond\w*/gi;
+// Een reden die met "wegens" of "omwille van" begint mag langer zijn: dat is
+// precies de vorm waarin een echte reden geschreven wordt.
+const REDEN_PREFIX = /^\s*(?:wegens|omwille van|door)\b/i;
 
 export const redenUitBericht = ({ titel, tekst } = {}) => {
   const alles = `${titel || ""} ${tekst || ""}`;
@@ -322,7 +422,11 @@ export const redenUitBericht = ({ titel, tekst } = {}) => {
   // november" het brokstuk "actie loopt" over, en dat komt op de website.
   const zinnen = ontkort(titel).split(/[.!?;\n\r]+/).map((z) => z.trim()).filter(Boolean);
   const bron = zinnen.find((z) => SLUITWOORD.test(z.toLowerCase())) || zinnen.join(" ");
+  const metPrefix = REDEN_PREFIX.test(bron.replace(/^[^a-zA-Z]+/, "")) || /\b(?:wegens|omwille van)\b/i.test(bron);
   const rest = bron
+    .replace(WEEKDAG_LOS, " ")
+    .replace(DEEL_UIT_TITEL, " ")
+    // "woensdagnamiddag" laat na het dagdeel nog een weekdag staan.
     .replace(WEEKDAG_LOS, " ")
     .replace(MAAND_LOS, " ")
     .replace(/\b\d{1,4}(?:[/-]\d{1,4})*\b/g, " ")
@@ -333,33 +437,49 @@ export const redenUitBericht = ({ titel, tekst } = {}) => {
     .replace(/\b[a-zA-Z]\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  // Wat hier staat komt letterlijk op de publieke site. Daarom geen "wat er
+  // toevallig overblijft", maar een oordeel: ofwel een reden die met "wegens"
+  // of "omwille van" begint, ofwel één of twee echte woorden ("Kerstsluiting",
+  // "Wegens ziekte"). Alles daarbuiten — losse brokstukken als "Belangrijk",
+  // "Nader order" of "Open" — wordt het neutrale "Gesloten".
+  const woorden = rest.split(" ").filter((w) => w.length >= 4);
+  if (!woorden.length) return "Gesloten";
   // Afkappen op 40 tekens, maar niet midden in een woord.
-  let uit = rest.slice(0, 40).trim();
-  if (rest.length > 40) {
-    const opWoord = uit.replace(/\s+\S*$/, "").trim();
-    if (opWoord.length >= 4) uit = opWoord;
-  }
-  // Wat hier staat komt letterlijk op de website. Blijft er geen echt woord
-  // over, dan liever het neutrale "Gesloten".
+  const kort = (t) => (t.length <= 40 ? t : t.slice(0, 40).replace(/\s+\S*$/, "").trim());
+  const uit = metPrefix
+    ? kort(`wegens ${woorden.join(" ")}`)
+    : (woorden.length <= 2 && woorden.join(" ") === rest ? kort(rest) : "");
   if (uit.length < 4) return "Gesloten";
   return uit.charAt(0).toUpperCase() + uit.slice(1);
 };
 
-// { soort, from, to, reason } of null.
-export const sluitingUitBericht = ({ titel, tekst, datum } = {}) => {
+// Alle lezingen uit één bericht: een lijst { soort, from, to, reason }.
+// Meestal nul of één, maar een opsomming van losse dagen ("gesloten op 24 en
+// 31 december") geeft er twee. De eerste zin die iets oplevert, telt — zo komt
+// een bericht niet uit twee verschillende zinnen tegelijk.
+export const sluitingenUitBericht = ({ titel, tekst, datum } = {}) => {
   const tijd = Date.parse(datum || "");
   const d = new Date(Number.isNaN(tijd) ? Date.now() : tijd);
   const basis = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 
   for (const zin of inZinnen(titel, tekst)) {
-    const hit = periodeInZin(zin, basis);
-    if (!hit) continue;
+    const lezingen = lezingenInZin(zin, basis);
+    if (!lezingen.length) continue;
     // Bij een open-dag zegt de reden welke feestdag het is; bij een sluiting
     // is het de korte reden uit het bericht.
-    const reason = hit.soort === "open"
-      ? hit.feestdagen.map((f) => f.name).join(" en ").slice(0, 120)
-      : redenUitBericht({ titel, tekst });
-    return { soort: hit.soort, from: hit.from, to: hit.to, reason };
+    const reden = redenUitBericht({ titel, tekst });
+    return lezingen.map((hit) => ({
+      soort: hit.soort,
+      from: hit.from,
+      to: hit.to,
+      reason: hit.soort === "open"
+        ? hit.feestdagen.map((f) => f.name).join(" en ").slice(0, 120)
+        : reden,
+    }));
   }
-  return null;
+  return [];
 };
+
+// De eerste lezing, of null. Voor wie er maar één verwacht.
+export const sluitingUitBericht = (bericht) => sluitingenUitBericht(bericht)[0] || null;

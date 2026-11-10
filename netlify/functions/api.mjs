@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { timingSafeEqual, randomUUID, createHash } from "node:crypto";
-import { sluitingUitBericht, feestdagenIn } from "./lib/sluiting-lezen.mjs";
+import { sluitingenUitBericht, feestdagenIn } from "./lib/sluiting-lezen.mjs";
+import { cleanClosures, gedekt } from "./lib/sluitingen.mjs";
 
 // API voor de website:
 //   GET  /api/closures                 sluitingsperiodes + feestdagen die niet gelden
@@ -73,12 +74,8 @@ const isUrl = (u) => typeof u === "string" && /^https:\/\/[^\s"<>]+$/.test(u) &&
 const isDate = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v));
 
 // ---------- Sluitingsperiodes ----------
-const cleanClosures = (list) =>
-  (Array.isArray(list) ? list : [])
-    .filter((c) => c && /^\d{4}-\d{2}-\d{2}$/.test(c.from || "") && /^\d{4}-\d{2}-\d{2}$/.test(c.to || ""))
-    .map((c) => ({ id: str(c.id || `c${Date.now()}`, 40), from: c.from, to: c.to, reason: str(c.reason, 120), note: str(c.note, 600) }))
-    .sort((a, b) => (a.from < b.from ? -1 : 1))
-    .slice(0, 60);
+// `cleanClosures` en `gedekt` staan in lib/sluitingen.mjs, omdat de geplande
+// functie (auto-sluiting.mjs) met dezelfde regels naar `closures` schrijft.
 
 // ---------- Sluitingsvoorstellen ----------
 // Een nieuwsbericht dat een sluiting aankondigt wordt een *voorstel* in
@@ -132,7 +129,6 @@ const voorstelSleutel = (v) => (v.soort === "open" ? `open|${v.from}|${v.to}` : 
 // voorstel, of de apotheker heeft die periode eerder afgehandeld. Bij een
 // open-dag telt een bestaande sluiting niet mee: die wint sowieso al op de
 // website, en de apotheker mag zelf zien dat het bericht iets anders zegt.
-const gedekt = (hit, closures) => closures.some((c) => c.from <= hit.from && c.to >= hit.to);
 const alOpen = (hit, feestdagOpen) => {
   const dagen = feestdagenIn(hit.from, hit.to).map((f) => f.iso);
   return dagen.length > 0 && dagen.every((d) => feestdagOpen.includes(d));
@@ -160,18 +156,25 @@ const voorstelVan = (bericht, hit) => ({
   gemaakt: new Date().toISOString(),
 });
 
-// Leest één bericht en bewaart er een voorstel voor als er een treffer is.
+// Leest één bericht en bewaart er voorstellen voor. Een opsomming van losse
+// dagen ("gesloten op 24 en 31 december") levert er meer dan één op.
 const bewaarVoorstel = async (store, bericht) => {
-  const hit = sluitingUitBericht(bericht);
-  if (!hit) return null;
+  const hits = sluitingenUitBericht(bericht);
+  if (!hits.length) return null;
   const closures = cleanClosures((await store.get("closures", { type: "json" })) || []);
-  const voorstellen = cleanVoorstellen((await store.get("closure-voorstellen", { type: "json" })) || []);
+  let voorstellen = cleanVoorstellen((await store.get("closure-voorstellen", { type: "json" })) || []);
   const weg = schoonWeg((await store.get("closure-voorstellen-weg", { type: "json" })) || []);
   const feestdagOpen = cleanFeestdagOpen((await store.get("feestdag-open", { type: "json" })) || []);
-  if (alBekend(hit, closures, voorstellen, weg, feestdagOpen)) return null;
-  const nieuw = voorstelVan(bericht, hit);
-  await store.setJSON("closure-voorstellen", cleanVoorstellen([nieuw, ...voorstellen]));
-  return nieuw;
+  const nieuw = [];
+  for (const hit of hits) {
+    if (alBekend(hit, closures, voorstellen, weg, feestdagOpen)) continue;
+    const v = voorstelVan(bericht, hit);
+    nieuw.push(v);
+    voorstellen = cleanVoorstellen([v, ...voorstellen]);
+  }
+  if (!nieuw.length) return null;
+  await store.setJSON("closure-voorstellen", voorstellen);
+  return nieuw[0];
 };
 
 // Leest alle bewaarde berichten opnieuw en vult de lijst aan. Zo komt een
@@ -184,10 +187,11 @@ const herscanBerichten = async (store, voorstellen) => {
   let lijst = voorstellen;
   let nieuw = false;
   for (const b of Array.isArray(berichten) ? berichten : []) {
-    const hit = sluitingUitBericht(b);
-    if (!hit || alBekend(hit, closures, lijst, weg, feestdagOpen)) continue;
-    lijst = cleanVoorstellen([voorstelVan(b, hit), ...lijst]);
-    nieuw = true;
+    for (const hit of sluitingenUitBericht(b)) {
+      if (alBekend(hit, closures, lijst, weg, feestdagOpen)) continue;
+      lijst = cleanVoorstellen([voorstelVan(b, hit), ...lijst]);
+      nieuw = true;
+    }
   }
   if (nieuw) await store.setJSON("closure-voorstellen", lijst);
   return lijst;

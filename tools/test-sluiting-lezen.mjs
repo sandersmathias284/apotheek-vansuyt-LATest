@@ -5,7 +5,7 @@
 // zin met de datums mag géén voorstel opleveren.
 
 import { readFileSync } from "node:fs";
-import { sluitingUitBericht, redenUitBericht, feestdagenIn } from "../netlify/functions/lib/sluiting-lezen.mjs";
+import { sluitingUitBericht, sluitingenUitBericht, redenUitBericht, feestdagenIn } from "../netlify/functions/lib/sluiting-lezen.mjs";
 
 const kort = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 64);
 const toon = (r) => (r ? `${r.soort}  ${r.from} .. ${r.to}  (${r.reason})` : "null");
@@ -279,6 +279,67 @@ test("T14. titel: Vakantie! Terug op 3 januari",
   { titel: "Vakantie! Terug op 3 januari", tekst: "", datum: "2026-12-20T09:00:00.000Z" }, null);
 test("T15. titel: met verlof, terug op 3 januari",
   { titel: "Wij zijn met verlof. Terug op 3 januari", tekst: "", datum: "2026-12-20T09:00:00.000Z" }, null);
+
+// ---------- Opsommingen (testrapport 3, bevindingen 2 en 3) ----------
+// "X en Y" is alleen een periode als de dagen aan elkaar liggen. Anders zijn
+// het losse sluitingen; een opsomming mag nooit één lang bereik worden.
+console.log("\nOpsommingen van losse dagen\n");
+
+const lijst = (naam, tekst, datum, verwacht) => {
+  let uit = [];
+  try {
+    uit = sluitingenUitBericht({ titel: "", tekst, datum: datum + "T09:00:00.000Z" });
+  } catch (e) {
+    fout++;
+    console.log(`FOUT  ${naam}\n      wierp een fout: ${e.message}`);
+    return;
+  }
+  const kort = uit.map((x) => `${x.soort} ${x.from}..${x.to}`).join(" + ") || "null";
+  if (kort === verwacht) {
+    goed++;
+    console.log(`ok    ${naam}\n      ${kort}`);
+  } else {
+    fout++;
+    console.log(`FOUT  ${naam}\n      verwacht: ${verwacht}\n      gekregen: ${kort}`);
+  }
+};
+
+lijst("P1. 24 en 31 december zijn twee dagen, geen week",
+  "Wij zijn gesloten op 24 en 31 december.", "2026-12-01",
+  "gesloten 2026-12-24..2026-12-24 + gesloten 2026-12-31..2026-12-31");
+lijst("P2. 1 en 15 mei",
+  "Wij zijn gesloten op 1 en 15 mei.", "2027-04-20",
+  "gesloten 2027-05-01..2027-05-01 + gesloten 2027-05-15..2027-05-15");
+lijst("P3. 2 en 30 november",
+  "Wij zijn gesloten op 2 en 30 november.", "2026-10-20",
+  "gesloten 2026-11-02..2026-11-02 + gesloten 2026-11-30..2026-11-30");
+lijst("P4. 11 en 13 november laat de donderdag open",
+  "Wij zijn gesloten op woensdag 11 en vrijdag 13 november.", "2026-11-07",
+  "gesloten 2026-11-11..2026-11-11 + gesloten 2026-11-13..2026-11-13");
+lijst("P5. 6 mei en 7 mei liggen aan elkaar: één periode",
+  "Wij zijn gesloten op donderdag 6 mei en vrijdag 7 mei.", "2027-04-20",
+  "gesloten 2027-05-06..2027-05-07");
+lijst("P6. 12, 13 en 14 november",
+  "Wij zijn gesloten op 12, 13 en 14 november.", "2026-11-07",
+  "gesloten 2026-11-12..2026-11-14");
+lijst("P7. 12 + 13 november",
+  "Wij zijn gesloten op 12 + 13 november.", "2026-11-07",
+  "gesloten 2026-11-12..2026-11-13");
+lijst("P8. drie dagen met de maand bij elke datum",
+  "Gesloten op 24 december, 25 december en 26 december. Terug open op 27 december", "2026-12-01",
+  "gesloten 2026-12-24..2026-12-26");
+lijst("P9. één datum plus heropening = tot de dag ervoor",
+  "Gesloten op 24 december, terug open op 4 januari", "2026-12-01",
+  "gesloten 2026-12-24..2027-01-03");
+lijst("P10. twee dagen na elkaar blijven één periode",
+  "Gesloten op 20 en 21 november.", "2026-11-10",
+  "gesloten 2026-11-20..2026-11-21");
+lijst("P11. het echte brugbericht blijft één bereik",
+  "Wij nemen een brug van woensdag 11 november tot en met zondag 15 november.", "2026-11-07",
+  "gesloten 2026-11-11..2026-11-15");
+lijst("P12. Black friday blijft niets",
+  "De verzorgingsproducten van Ray krijgen een mooie korting in de week van 20-28 november 2026 !", "2026-11-09",
+  "null");
 
 // ---------- Korte reden (redenUitBericht) ----------
 console.log("\nKorte reden voor op de website\n");
