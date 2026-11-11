@@ -341,6 +341,26 @@ lijst("P12. Black friday blijft niets",
   "De verzorgingsproducten van Ray krijgen een mooie korting in de week van 20-28 november 2026 !", "2026-11-09",
   "null");
 
+// ---------- Klein uit testrapport 3 ----------
+console.log("\nKleine lezingen uit het derde rapport\n");
+
+const kl = (naam, titel, tekst, datum, from, to, soort = "gesloten") =>
+  test(naam, { titel, tekst, datum: datum + "T09:00:00.000Z" }, from, to, soort);
+
+kl("K1. titel en tekst spreken elkaar tegen",
+  "Gesloten op 11 november", "Update: wij zijn toch gewoon open op 11 november.", "2026-11-07", null);
+kl("K2. tegenspraak in de andere richting",
+  "Wij zijn open op 11 november", "Helaas toch gesloten op 11 november wegens ziekte.", "2026-11-07", null);
+kl("K3. titel en tekst zeggen hetzelfde",
+  "Apotheek gesloten van 11 tot en met 15 november", "Wij nemen een brug van woensdag 11 november tot en met zondag 15 november.",
+  "2026-11-07", "2026-11-11", "2026-11-15");
+kl("K4. slecht weer is geen heropening",
+  "", "Wegens slecht weer zijn wij gesloten op 12 november.", "2026-11-07", "2026-11-12", "2026-11-12");
+kl("K5. punten in O.L.H. knippen de zin niet",
+  "", "Op 6 mei (O.L.H. Hemelvaart) zijn wij open.", "2027-04-20", "2027-05-06", "2027-05-06", "open");
+kl("K6. de wachtapotheek is een andere apotheek",
+  "", "Op 11 november is de wachtapotheek open. Wij zijn gesloten.", "2026-11-07", null);
+
 // ---------- Korte reden (redenUitBericht) ----------
 console.log("\nKorte reden voor op de website\n");
 

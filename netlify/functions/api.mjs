@@ -1,7 +1,10 @@
 import { getStore } from "@netlify/blobs";
 import { timingSafeEqual, randomUUID, createHash } from "node:crypto";
-import { sluitingenUitBericht, feestdagenIn } from "./lib/sluiting-lezen.mjs";
-import { cleanClosures, gedekt } from "./lib/sluitingen.mjs";
+import { feestdagenIn } from "./lib/sluiting-lezen.mjs";
+import {
+  cleanClosures, cleanVoorstellen, cleanFeestdagOpen, schoonWeg, voorstelSleutel,
+  gedekt, bewaarWeg, bewaarTeruggedraaid, verwerkBerichten, isoVan, MAX_FEESTDAG_OPEN,
+} from "./lib/sluitingen.mjs";
 
 // API voor de website:
 //   GET  /api/closures                 sluitingsperiodes + feestdagen die niet gelden
@@ -77,125 +80,10 @@ const isDate = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v));
 // `cleanClosures` en `gedekt` staan in lib/sluitingen.mjs, omdat de geplande
 // functie (auto-sluiting.mjs) met dezelfde regels naar `closures` schrijft.
 
-// ---------- Sluitingsvoorstellen ----------
-// Een nieuwsbericht dat een sluiting aankondigt wordt een *voorstel* in
-// /beheer/, nooit een sluiting op de website: een foute lezing zou de apotheek
-// sluiten terwijl ze open is. De apotheker tikt Toevoegen of Negeren.
-//
-// Er zijn twee soorten. "gesloten" wordt na Toevoegen een sluitingsperiode in
-// `closures`. "open" zegt dat de apotheek op een feestdag toch open is; die
-// dagen komen in `feestdag-open`, waarmee de website de feestdagenlijst voor
-// net die dagen overslaat. Nooit in `closures`: een sluitingsperiode kan geen
-// "open" betekenen.
-const MAX_VOORSTELLEN = 20;
-const MAX_WEG = 50;
-const MAX_FEESTDAG_OPEN = 40;
-
-// Dagen waarop de feestdagenlijst niet geldt.
-const cleanFeestdagOpen = (list) =>
-  [...new Set((Array.isArray(list) ? list : []).filter((v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)))]
-    .sort()
-    .slice(0, MAX_FEESTDAG_OPEN);
-
-const cleanVoorstellen = (list) =>
-  (Array.isArray(list) ? list : [])
-    .filter((v) => v && /^\d{4}-\d{2}-\d{2}$/.test(v.from || "") && /^\d{4}-\d{2}-\d{2}$/.test(v.to || ""))
-    .map((v) => ({
-      id: str(v.id, 40) || randomUUID(),
-      berichtId: str(v.berichtId, 60),
-      berichtDatum: isDate(v.berichtDatum) ? new Date(v.berichtDatum).toISOString() : null,
-      berichtTitel: str(v.berichtTitel, 140),
-      // Voorstellen van vóór de open-soort hebben geen `soort` en zijn sluitingen.
-      soort: v.soort === "open" ? "open" : "gesloten",
-      from: v.from,
-      to: v.to,
-      reason: str(v.reason, 120),
-      gemaakt: isDate(v.gemaakt) ? new Date(v.gemaakt).toISOString() : new Date().toISOString(),
-    }))
-    .sort((a, b) => (Date.parse(b.berichtDatum) || 0) - (Date.parse(a.berichtDatum) || 0))
-    .slice(0, MAX_VOORSTELLEN);
-
-// Afgehandelde voorstellen (genegeerd of toegevoegd) worden bewaard als
-// "from|to", of "open|from|to" voor een open-dag, zodat hetzelfde bericht niet
-// opnieuw een voorstel oplevert — ook niet als de sluiting later weer
-// verwijderd wordt.
-const schoonWeg = (list) =>
-  (Array.isArray(list) ? list : [])
-    .filter((k) => typeof k === "string" && /^(?:open\|)?\d{4}-\d{2}-\d{2}\|\d{4}-\d{2}-\d{2}$/.test(k))
-    .slice(0, MAX_WEG);
-const voorstelSleutel = (v) => (v.soort === "open" ? `open|${v.from}|${v.to}` : `${v.from}|${v.to}`);
-
-// Al bekend = er is al een sluiting die de periode dekt, er staat al zo'n
-// voorstel, of de apotheker heeft die periode eerder afgehandeld. Bij een
-// open-dag telt een bestaande sluiting niet mee: die wint sowieso al op de
-// website, en de apotheker mag zelf zien dat het bericht iets anders zegt.
-const alOpen = (hit, feestdagOpen) => {
-  const dagen = feestdagenIn(hit.from, hit.to).map((f) => f.iso);
-  return dagen.length > 0 && dagen.every((d) => feestdagOpen.includes(d));
-};
-const alBekend = (hit, closures, voorstellen, weg, feestdagOpen) =>
-  (hit.soort === "open" ? alOpen(hit, feestdagOpen) : gedekt(hit, closures)) ||
-  voorstellen.some((v) => v.soort === hit.soort && v.from === hit.from && v.to === hit.to) ||
-  weg.includes(voorstelSleutel(hit));
-
-// Zet een afgehandelde periode vooraan in de weg-lijst.
-const bewaarWeg = async (store, sleutel) => {
-  const weg = schoonWeg((await store.get("closure-voorstellen-weg", { type: "json" })) || []);
-  await store.setJSON("closure-voorstellen-weg", [sleutel, ...weg.filter((k) => k !== sleutel)].slice(0, MAX_WEG));
-};
-
-const voorstelVan = (bericht, hit) => ({
-  id: randomUUID(),
-  berichtId: bericht.id,
-  berichtDatum: bericht.datum,
-  berichtTitel: bericht.titel,
-  soort: hit.soort === "open" ? "open" : "gesloten",
-  from: hit.from,
-  to: hit.to,
-  reason: hit.reason,
-  gemaakt: new Date().toISOString(),
-});
-
-// Leest één bericht en bewaart er voorstellen voor. Een opsomming van losse
-// dagen ("gesloten op 24 en 31 december") levert er meer dan één op.
-const bewaarVoorstel = async (store, bericht) => {
-  const hits = sluitingenUitBericht(bericht);
-  if (!hits.length) return null;
-  const closures = cleanClosures((await store.get("closures", { type: "json" })) || []);
-  let voorstellen = cleanVoorstellen((await store.get("closure-voorstellen", { type: "json" })) || []);
-  const weg = schoonWeg((await store.get("closure-voorstellen-weg", { type: "json" })) || []);
-  const feestdagOpen = cleanFeestdagOpen((await store.get("feestdag-open", { type: "json" })) || []);
-  const nieuw = [];
-  for (const hit of hits) {
-    if (alBekend(hit, closures, voorstellen, weg, feestdagOpen)) continue;
-    const v = voorstelVan(bericht, hit);
-    nieuw.push(v);
-    voorstellen = cleanVoorstellen([v, ...voorstellen]);
-  }
-  if (!nieuw.length) return null;
-  await store.setJSON("closure-voorstellen", voorstellen);
-  return nieuw[0];
-};
-
-// Leest alle bewaarde berichten opnieuw en vult de lijst aan. Zo komt een
-// sluiting uit een ouder bericht ook boven zonder dat er iets getypt wordt.
-const herscanBerichten = async (store, voorstellen) => {
-  const berichten = (await store.get("berichten", { type: "json" })) || [];
-  const closures = cleanClosures((await store.get("closures", { type: "json" })) || []);
-  const weg = schoonWeg((await store.get("closure-voorstellen-weg", { type: "json" })) || []);
-  const feestdagOpen = cleanFeestdagOpen((await store.get("feestdag-open", { type: "json" })) || []);
-  let lijst = voorstellen;
-  let nieuw = false;
-  for (const b of Array.isArray(berichten) ? berichten : []) {
-    for (const hit of sluitingenUitBericht(b)) {
-      if (alBekend(hit, closures, lijst, weg, feestdagOpen)) continue;
-      lijst = cleanVoorstellen([voorstelVan(b, hit), ...lijst]);
-      nieuw = true;
-    }
-  }
-  if (nieuw) await store.setJSON("closure-voorstellen", lijst);
-  return lijst;
-};
+// ---------- Sluitingsvoorstellen en meldingen ----------
+// De regels staan in lib/sluitingen.mjs, omdat de geplande functie
+// (auto-sluiting.mjs) dezelfde weg naar `closures` gebruikt. Zeker leest de
+// server zelf toe; wat niet zeker is, blijft een voorstel met Toevoegen.
 
 // ---------- Berichten ----------
 // Een bericht zoals het bewaard wordt:
@@ -269,7 +157,12 @@ export default async (req, context) => {
     if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
     const nee = await bewaak(req, context, store); if (nee) return nee;
     let lijst = cleanVoorstellen((await store.get("closure-voorstellen", { type: "json" })) || []);
-    if (new URL(req.url).searchParams.get("herscan") === "1") lijst = await herscanBerichten(store, lijst);
+    if (new URL(req.url).searchParams.get("herscan") === "1") {
+      // Dezelfde weg als de geplande functie: zekere lezingen toepassen, de
+      // rest als voorstel, en voorstellen die de lezer niet meer maakt weg.
+      const uit = await verwerkBerichten(store, (await store.get("berichten", { type: "json" })) || []);
+      lijst = uit.lijst;
+    }
     return json({ voorstellen: lijst });
   }
 
@@ -293,6 +186,45 @@ export default async (req, context) => {
     const hit = lijst.find((v) => v.id === voorstel[1]);
     if (!hit) return json({ error: "not found" }, 404);
     const rest = lijst.filter((v) => v.id !== hit.id);
+
+    // Een automatisch toegepaste sluiting weer weghalen. De periode blijft in
+    // de weg-lijst staan, zodat een herscan ze niet opnieuw toepast.
+    if (body.actie === "terugdraaien") {
+      if (!hit.toegepast) return json({ error: "dit is geen toegepaste melding" }, 400);
+      if (hit.soort === "open") {
+        const nu = cleanFeestdagOpen((await store.get("feestdag-open", { type: "json" })) || []);
+        await store.setJSON("feestdag-open", nu.filter((d) => !hit.dagen.includes(d)));
+      } else {
+        // Alleen op id. Op "dezelfde datums" zou ook een sluiting wissen die zij
+        // zelf ingaf of aanpaste — met haar eigen reden en notitie erin.
+        const oud = cleanClosures((await store.get("closures", { type: "json" })) || []);
+        const over = oud.filter((c) => c.id !== hit.closureId);
+        if (over.length === oud.length) {
+          // Ze is er al niet meer, of ze is intussen vervangen door haar eigen
+          // invoer. Dan de melding opruimen en van de sluiting afblijven.
+          await store.setJSON("closure-voorstellen", rest);
+          return json({ ok: true, closures: oud, melding: "Die sluiting stond er al niet meer." });
+        }
+        await store.setJSON("closures", over);
+      }
+      await store.setJSON("closure-voorstellen", rest);
+      // Uit "afgehandeld" halen en in "teruggedraaid" zetten: zo komt ze niet
+      // vanzelf terug, maar levert een nieuw bericht over diezelfde dagen wel
+      // nog een voorstel op in plaats van stilte.
+      const sleutel = voorstelSleutel(hit);
+      const wegNu = schoonWeg((await store.get("closure-voorstellen-weg", { type: "json" })) || []);
+      await store.setJSON("closure-voorstellen-weg", wegNu.filter((k) => k !== sleutel));
+      await bewaarTeruggedraaid(store, sleutel);
+      const closures = cleanClosures((await store.get("closures", { type: "json" })) || []);
+      return json({ ok: true, closures, melding: "Teruggedraaid." });
+    }
+
+    // Melding wegklikken: ze is gezien, de sluiting blijft staan.
+    if (body.actie === "weg") {
+      await store.setJSON("closure-voorstellen", rest);
+      return json({ ok: true });
+    }
+
     if (body.actie === "toevoegen") {
       const oud = cleanClosures((await store.get("closures", { type: "json" })) || []);
       // Ook een afgehandeld voorstel onthouden: wordt het later weer
@@ -327,7 +259,7 @@ export default async (req, context) => {
       await bewaarWeg(store, voorstelSleutel(hit));
       return json({ ok: true });
     }
-    return json({ error: "actie moet toevoegen of negeren zijn" }, 400);
+    return json({ error: "actie moet toevoegen, negeren, terugdraaien of weg zijn" }, 400);
   }
 
   const foto = /\/api\/berichten\/foto\/([A-Za-z0-9-]{1,60})$/.exec(path);
@@ -377,10 +309,11 @@ export default async (req, context) => {
       // foto's van berichten die eruit vallen opruimen
       for (const weg of list.slice(MAX_BERICHTEN - 1)) await store.delete(`foto/${weg.id}`);
       await store.setJSON("berichten", next);
-      // Kondigt dit bericht een sluiting aan? Dan komt er een voorstel bij voor
-      // /beheer/. Lukt het lezen niet, dan blijft het bericht gewoon staan:
-      // een mislukte lezing mag het plaatsen nooit breken.
-      try { await bewaarVoorstel(store, bericht); } catch (e) {}
+      // Kondigt dit bericht een sluiting aan? Een zekere lezing gaat meteen op
+      // de website, met een melding in /beheer/; de rest wordt een voorstel.
+      // Lukt het lezen niet, dan blijft het bericht gewoon staan: een mislukte
+      // lezing mag het plaatsen nooit breken.
+      try { await verwerkBerichten(store, [bericht]); } catch (e) {}
       return json({ ok: true, bericht }, 201);
     }
     return json({ error: "method not allowed" }, 405);

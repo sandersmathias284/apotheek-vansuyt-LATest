@@ -73,8 +73,25 @@ const fetchClosuresNu = async () => {
 };
 
 // Bewaart de lijst centraal. Geeft {ok, error} terug.
-const pushClosures = async (list, code) => {
-  const sorted = cacheClosures(list);
+//
+// `vorige` is de lijst zoals de pagina ze kende vóór deze wijziging. Daarmee
+// blijft een sluiting staan die intussen door de uurtaak of een nieuw bericht
+// is bijgekomen: zonder dat zou de pagina de hele lijst overschrijven met wat
+// ze toevallig geladen had, en stond de apotheek weer open op de site.
+const pushClosures = async (list, code, vorige) => {
+  let samen = list;
+  if (Array.isArray(vorige)) {
+    try {
+      const res = await fetch(`${CLOSURE_API}?t=${Date.now()}`, { cache: "no-store" });
+      const data = res.ok ? await res.json() : null;
+      const server = Array.isArray(data && data.closures) ? data.closures : [];
+      const kende = new Set(vorige.map((c) => c.id));
+      const nu = new Set(list.map((c) => c.id));
+      const bijgekomen = server.filter((c) => !kende.has(c.id) && !nu.has(c.id));
+      if (bijgekomen.length) samen = [...list, ...bijgekomen];
+    } catch (e) { /* geen verbinding: dan maar met wat we hebben */ }
+  }
+  const sorted = cacheClosures(samen);
   try {
     const res = await fetch(CLOSURE_API, {
       method: "PUT",
@@ -234,7 +251,9 @@ const ClosureBar = ({ setPage }) => {
         <span className="cb-text">
           <strong>Wij zijn gesloten</strong>
           <span className="cb-sep">·</span>
-          <time dateTime={active.from}>{fmtDateShort(active.from)}</time> — <time dateTime={active.to}>{fmtDateShort(active.to)}</time>
+          {active.from === active.to
+            ? <time dateTime={active.from}>{fmtDateShort(active.from)}</time>
+            : <><time dateTime={active.from}>{fmtDateShort(active.from)}</time> — <time dateTime={active.to}>{fmtDateShort(active.to)}</time></>}
           {reopen ? <><span className="cb-sep">·</span>opnieuw open op {reopen.toLocaleDateString("nl-BE", { weekday: "long", day: "numeric", month: "long" })} om {reopen.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}</> : null}
         </span>
         <a className="cb-link" href={WACHT_URL} target="_blank" rel="noreferrer">Apotheek van wacht →</a>
@@ -258,7 +277,13 @@ const ClosurePanel = ({ setPage }) => {
           <header className="cp-head">
             <span className="mono">Sluitingsperiode</span>
             <h2>De apotheek is <em>gesloten</em>.</h2>
-            <p className="cp-dates"><time dateTime={active.from}>{fmtDate(active.from)}</time> tot en met <time dateTime={active.to}>{fmtDate(active.to)}</time>{active.reason ? ` · ${active.reason}` : ""}</p>
+            <p className="cp-dates">
+            {/* Eén dag leest als "op 12 november", niet als "van ... tot en met ..." */}
+            {active.from === active.to
+              ? <>op <time dateTime={active.from}>{fmtDate(active.from)}</time></>
+              : <><time dateTime={active.from}>{fmtDate(active.from)}</time> tot en met <time dateTime={active.to}>{fmtDate(active.to)}</time></>}
+            {active.reason ? ` · ${active.reason}` : ""}
+          </p>
             {active.note ? <p className="cp-note">{active.note}</p> : null}
           </header>
           <div className="cp-timer">
@@ -295,7 +320,9 @@ const ClosurePanel = ({ setPage }) => {
         <div className="closure-notice">
           <span className="mono">Aangekondigde sluiting</span>
           <p>
-            Wij zijn gesloten van <strong>{fmtDate(next.from)}</strong> tot en met <strong>{fmtDate(next.to)}</strong>
+            {next.from === next.to
+              ? <>Wij zijn gesloten op <strong>{fmtDate(next.from)}</strong></>
+              : <>Wij zijn gesloten van <strong>{fmtDate(next.from)}</strong> tot en met <strong>{fmtDate(next.to)}</strong></>}
             {next.reason ? ` (${next.reason})` : ""} — over {daysAway} {daysAway === 1 ? "dag" : "dagen"}.
             {next.note ? ` ${next.note}` : ""}
           </p>

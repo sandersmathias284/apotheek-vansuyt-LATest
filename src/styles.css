@@ -1936,6 +1936,19 @@ html.js noscript{display:none !important}
    kader er precies onder zodra de focus of de link "Naar het voorstel" het in
    beeld brengt, en leest ze de bevestiging niet. */
 .voorstellen, .bh-feestdagen { scroll-margin-top: 88px; }
+/* Melding: dit is al toegepast, het is geen vraag meer. Rustiger kader dan een
+   voorstel, maar wel zichtbaar tot ze het wegklikt. */
+.voorstel-gedaan { border-color: var(--rule); background: var(--cream); }
+.voorstel-gedaan .mono { color: var(--ink-3); }
+/* De telefoonherinnering in een melding: het enige wat zij nog zelf moet doen. */
+.voorstel-voys { margin: 12px 0 0; padding: 10px 12px; border-left: 2px solid var(--red); background: #FDF4F4; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); }
+.voorstel-voys a.inline { color: var(--red-deep); border-bottom: 1px solid var(--red); padding-bottom: 1px; white-space: nowrap; }
+/* Lange woorden in een berichttitel maakten de pagina breder dan het scherm.
+   Het hele kader moet breken, niet alleen de bronregel: een geplakte link in
+   de titel staat ook in de kop en in de knopnaam. */
+.voorstel, .voorstel *, .bh-item, .bh-item * { overflow-wrap: anywhere; min-width: 0; }
+/* Waarom een voorstel geen automatische sluiting werd. */
+.voorstel-waarom { margin: 10px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-3); font-style: italic; }
 /* Voorstel van de soort "open": de apotheek is die feestdag tóch open. Groen
    in plaats van kleirood, zodat de twee soorten niet te verwarren zijn. */
 .voorstel-open { border-color: var(--sage); }
@@ -1949,9 +1962,10 @@ html.js noscript{display:none !important}
 .bh-feestdagen li > span { min-width: 0; }
 /* Loopt er een eigen sluiting over die dag, dan wint die: geen groen randje. */
 .bh-feestdagen li.dicht { border-left-color: var(--rule); color: var(--ink-3); }
-.bh-feestdagen button { background: none; border: 1px solid var(--ink); border-radius: 999px; padding: 9px 16px; font-size: 13px; min-height: 44px; }
-.bh-feestdagen button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
-.bh-feestdagen button:disabled { opacity: .6; cursor: progress; }
+.bh-feestdagen .voys-herinnering { margin-top: 14px; }
+.bh-feestdagen li button { background: none; border: 1px solid var(--ink); border-radius: 999px; padding: 9px 16px; font-size: 13px; min-height: 44px; }
+.bh-feestdagen li button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+.bh-feestdagen li button:disabled { opacity: .6; cursor: progress; }
 /* Feestdag waarop de apotheek open is, in de lijst op de onthaalpagina. */
 .feestdag-open { color: var(--sage-deep); }
 /* Wijzer bij het berichtenformulier naar de balk bovenaan. */

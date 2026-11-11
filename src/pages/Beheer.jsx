@@ -2,7 +2,7 @@
 import React from "react";
 import { useNow } from "../lib/hours.js";
 import { useClosures, activeClosure, closureOp, writeClosures, pushClosures, fetchClosures, remoteState, checkCode, isoOf, fmtDate, dayStart, useFeestdagOpen, WACHT_URL } from "../components/Closure.jsx";
-import { holidayOn } from "../lib/feestdagen.js";
+import { holidayOn, holidaysOf } from "../lib/feestdagen.js";
 import { VaccinatieAgenda } from "./Catalog.jsx";
 import { hrefOf } from "../routes.js";
 import { NIEUWS_API } from "../components/Nieuws.jsx";
@@ -95,15 +95,19 @@ const BeheerPanel = ({ setPage, onLock }) => {
   // bovenaan; bij het berichtenformulier komt dan een regel die erheen wijst.
   const [voorstelRonde, setVoorstelRonde] = React.useState(0);
   const [voorstelWijzer, setVoorstelWijzer] = React.useState("");
+  // Nalezen op verzoek: anders wacht ze op het uur van de geplande taak.
+  const [herscanRonde, setHerscanRonde] = React.useState(0);
 
   const commit = async (next, okMsg, periode) => {
+    const vorige = list;
     setList(writeClosures(next));
     setSync({ state: "busy", msg: "Centraal bewaren…" });
-    const res = await pushClosures(next, sessionStorage.getItem(CODE_KEY) || "");
+    const res = await pushClosures(next, sessionStorage.getItem(CODE_KEY) || "", vorige);
     if (res.ok) {
       setSync({ state: "ok", msg: "Centraal bewaard — zichtbaar voor alle bezoekers." });
       say(okMsg);
-      setVoysHerinnering({ periode: periode || null });
+      fetchClosures();
+      setVoysHerinnering({ periode: periode || null, soort: "sluiting" });
     } else {
       setSync({ state: "err", msg: res.error });
     }
@@ -165,25 +169,36 @@ const BeheerPanel = ({ setPage, onLock }) => {
           </div>
           <div className="bh-top-actions">
             <a className="btn btn-ghost" href={hrefOf("home")} onClick={(e) => { e.preventDefault(); setPage("home"); }}>Website bekijken</a>
+            {/* De server leest de berichten elk uur zelf na; hiermee hoeft ze
+                daar niet op te wachten. */}
+            <button type="button" className="bh-lock" onClick={() => setHerscanRonde((r) => r + 1)}>Berichten nu nalezen</button>
             <button type="button" className="bh-lock" onClick={onLock}>Vergrendelen</button>
           </div>
         </div>
 
         <Sluitingsvoorstellen
           ronde={voorstelRonde}
-          onNieuw={() => setVoorstelWijzer("Er is een sluitingsvoorstel bovenaan de pagina.")}
+          herscanRonde={herscanRonde}
+          closures={list}
+          onAanpassen={(v) => {
+            // Het bestaande formulier invullen met deze periode, zodat ze de
+            // datums of de reden kan verbeteren zonder opnieuw te typen.
+            edit({ id: v.closureId || `c${Date.now()}`, from: v.from, to: v.to, reason: v.reason, note: v.note || "" });
+          }}
+          onNieuw={() => setVoorstelWijzer("Het bericht is gelezen. Kijk bovenaan de pagina wat er met de website gebeurd is.")}
           onToegevoegd={(v, melding, dubbel) => {
             // De server bewaarde de sluiting al: opnieuw ophalen laat de lijst
             // hieronder en de statusbalk op de website meteen volgen.
             fetchClosures();
             say(melding);
             // Ook een open-dag vraagt iets van de telefoon: dan moet de
-            // doorschakeling juist uit. Ligt die dag binnen een eigen sluiting,
-            // dan blijft de apotheek dicht en moet er aan de telefoon niets
-            // veranderen — dan dus geen herinnering.
+            // doorschakeling juist uit. Dagen die binnen een eigen sluiting
+            // vallen blijven dicht en hoeven niets — valt het hele bereik
+            // daarbinnen, dan dus geen herinnering.
             const openDag = v.soort === "open";
-            if (!dubbel && !(openDag && closureOp(v.from))) {
-              setVoysHerinnering({ periode: { from: v.from, to: v.to }, soort: openDag ? "open" : "sluiting" });
+            const dagen = openDag ? openDagenZonderSluiting(v).map((h) => h.iso) : [];
+            if (!dubbel && (!openDag || dagen.length)) {
+              setVoysHerinnering({ periode: { from: v.from, to: v.to }, dagen, soort: openDag ? "open" : "sluiting" });
             }
           }}
         />
@@ -263,13 +278,7 @@ const BeheerPanel = ({ setPage, onLock }) => {
                 })}
               </ul>
             )}
-            <FeestdagenOpen
-              onKlaar={(m, dag) => {
-                say(m);
-                // De telefoon moet weer in de feestdagstand: doorschakeling aan.
-                if (dag) setVoysHerinnering({ periode: { from: dag, to: dag }, soort: "terug" });
-              }}
-            />
+            <FeestdagenOpen onKlaar={(m) => say(m)} />
             <aside className="callout" style={{ marginTop: 24 }}>
               <span className="mono">Zo werkt het</span>
               <h3>Automatisch aan en uit</h3>
@@ -308,23 +317,33 @@ const BeheerPanel = ({ setPage, onLock }) => {
 // De telefoon staat los van de website: na elke bewaarde periode een herinnering.
 const VOYS_URL = "https://www.voys.be/";
 
-const VoysHerinnering = ({ periode, soort, onSluit }) => (
+// "25 december 2026 en 1 januari 2027"
+const dagenZin = (dagen) => dagen.map((d) => fmtDate(d)).join(" en ");
+// "op 12 november 2026" of "van 11 tot en met 15 november 2026"
+const periodeTekst = (p) => (p.from === p.to
+  ? `op ${fmtDate(p.from)}`
+  : `van ${fmtDate(p.from)} tot en met ${fmtDate(p.to)}`);
+
+const VoysHerinnering = ({ periode, dagen, soort, onSluit }) => (
   <aside className="voys-herinnering" role="status" aria-live="polite">
     <div>
       <span className="mono">Telefoon · Voys</span>
       <h3>Vergeet de telefoon niet</h3>
       <p>
-        {soort === "terug" && periode
+        {soort === "sluiting-terug" && periode
+          // Teruggedraaid: wat ze net in Voys instelde, moet weer weg.
+          ? <>Draai in Voys de sluiting <strong>{periodeTekst(periode)}</strong> ook weer terug, anders horen bellers een melding die niet meer klopt.</>
+          : soort === "terug" && periode
           // Teruggedraaid: de dag is weer een gewone feestdag, dus de
           // doorschakeling moet weer aan staan.
-          ? <>Zet in Voys de doorschakeling weer <strong>aan</strong> voor <strong>{fmtDate(periode.from)}</strong>: die feestdag is de apotheek toch gesloten.</>
+          ? <>Zet in Voys de doorschakeling weer <strong>aan</strong> voor <strong>{dagen && dagen.length ? dagenZin(dagen) : fmtDate(periode.from)}</strong>: die feestdag is de apotheek toch gesloten.</>
           : soort === "open" && periode
           // Op een feestdag staat de telefoon normaal doorgeschakeld naar de
           // wachtdienst. Bent u die dag open, dan moet die doorschakeling uit,
           // anders sturen bellers naar een andere apotheek terwijl u er staat.
-          ? <>Zet in Voys de doorschakeling <strong>uit</strong> voor <strong>{fmtDate(periode.from)}</strong>: op een feestdag gaan bellers anders naar de apotheek van wacht, terwijl u gewoon open bent.</>
+          ? <>Zet in Voys de doorschakeling <strong>uit</strong> voor <strong>{dagen && dagen.length ? dagenZin(dagen) : fmtDate(periode.from)}</strong>: op een feestdag gaan bellers anders naar de apotheek van wacht, terwijl u gewoon open bent.</>
           : periode
-            ? <>Stel in Voys ook de sluiting in van <strong>{fmtDate(periode.from)}</strong> tot en met <strong>{fmtDate(periode.to)}</strong>, zodat bellers de juiste melding horen.</>
+            ? <>Stel in Voys ook de sluiting in <strong>{periodeTekst(periode)}</strong>, zodat bellers de juiste melding horen.</>
             : <>Pas in Voys ook de sluiting aan, zodat bellers de juiste melding horen.</>}
       </p>
     </div>
@@ -371,6 +390,19 @@ const periodeKort = (v) => (v.from === v.to ? fmtDate(v.from) : `${fmtDate(v.fro
 // vakantie"). Ze staat in het veld en is aan te passen vóór ze op de site komt.
 const standaardReden = (v) => (v.reason || "Gesloten").slice(0, 120);
 
+// De feestdagen in een periode — dezelfde lijst als de website gebruikt. Een
+// open-bereik kan er meer dan één raken ("van 24 december tot en met 2 januari"
+// gaat over Kerstmis én Nieuwjaar), en dan moeten die allebei genoemd worden.
+const feestdagenTussen = (from, to) => {
+  const jaren = [...new Set([from.slice(0, 4), to.slice(0, 4)].map(Number))];
+  return jaren
+    .flatMap((j) => holidaysOf(j))
+    .filter((h) => h.gesloten && h.iso >= from && h.iso <= to)
+    .sort((a, b) => (a.iso < b.iso ? -1 : 1));
+};
+// De dagen uit een open-voorstel die haar eigen sluiting níet al dichthoudt.
+const openDagenZonderSluiting = (v) => feestdagenTussen(v.from, v.to).filter((h) => !closureOp(h.iso));
+
 // Geen statuscodes of Engelse browserfouten tonen, maar gewone taal.
 const foutTekst = (res, data) => {
   if (!res) return "Geen verbinding met de server. Probeer het opnieuw.";
@@ -379,7 +411,43 @@ const foutTekst = (res, data) => {
   return "De server kon het niet bewaren. Probeer het opnieuw.";
 };
 
-const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
+// De telefoon staat los van de website. Bij een melding is er geen tik meer
+// geweest waar de herinnering aan kon hangen, dus staat ze in de melding zelf —
+// het is het enige dat zij nog met de hand moet doen.
+const VoysRegel = ({ v }) => {
+  const dagen = isOpen(v) ? openDagenZonderSluiting(v).map((h) => h.iso) : [];
+  if (isOpen(v) && !dagen.length) return null; // eigen sluiting gaat voor: niets te doen
+  return (
+    <p className="voorstel-voys">
+      <strong>Vergeet de telefoon niet.</strong>{" "}
+      {isOpen(v)
+        ? <>Zet in Voys de doorschakeling <strong>uit</strong> voor {dagen.map((d) => fmtDate(d)).join(" en ")}, anders gaan bellers naar de apotheek van wacht terwijl u open bent.</>
+        : <>Stel in Voys ook de sluiting in {periodeTekst(v)}, zodat bellers de juiste melding horen.</>}{" "}
+      <a className="inline" href={VOYS_URL} target="_blank" rel="noreferrer">Naar Voys →</a>
+    </p>
+  );
+};
+
+// Wat staat er van deze melding nu echt op de website? De apotheker kan de
+// sluiting intussen zelf aangepast of verwijderd hebben; dan mag de melding
+// niet blijven doen alsof ze nog klopt.
+// Wat de melding moet tonen: de sluiting zoals ze nu op de site staat, zodat
+// Aanpassen haar eigen wijziging en notitie niet overschrijft met oude waarden.
+const toonWaarden = (v, closures) => {
+  if (!v.toegepast || v.soort === "open") return v;
+  const c = (closures || []).find((x) => x.id === v.closureId);
+  return c ? { ...v, from: c.from, to: c.to, reason: c.reason, note: c.note } : v;
+};
+
+const staatVanMelding = (v, closures) => {
+  if (v.soort === "open") return { stand: "ok", closure: null };
+  const c = (closures || []).find((x) => x.id === v.closureId);
+  if (!c) return { stand: "weg", closure: null };
+  if (c.from !== v.from || c.to !== v.to || c.reason !== v.reason) return { stand: "gewijzigd", closure: c };
+  return { stand: "ok", closure: c };
+};
+
+const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd, onAanpassen, herscanRonde, closures }) => {
   const code = () => { try { return sessionStorage.getItem(CODE_KEY) || ""; } catch (e) { return ""; } };
   const [list, setList] = React.useState([]);
   const [redenen, setRedenen] = React.useState({});
@@ -387,8 +455,16 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
   const [fout, setFout] = React.useState({ id: "", tekst: "" });
   const [melding, setMelding] = React.useState("");
   const [laadfout, setLaadfout] = React.useState("");
+  // Herinnering voor de telefoon, hier in het kader zelf: de knop staat hier,
+  // en bovenaan de pagina ziet ze ze niet.
+  const [voys, setVoys] = React.useState(null);
+  // Na elke actie opnieuw ophalen: wat de server zegt telt, niet wat de pagina
+  // hoopt. Twee tikken kort na elkaar lieten anders een melding verdwijnen
+  // terwijl de sluiting op de site bleef staan.
+  const [vernieuw, setVernieuw] = React.useState(0);
   const kader = React.useRef(null);
   const gezien = React.useRef(new Set());
+  const vorigeHerscan = React.useRef(-1);
 
   // Bij het laden ook de al bewaarde berichten herscannen, zodat een sluiting
   // uit een ouder bericht hier alsnog boven komt. Na een nieuw bericht volstaat
@@ -397,8 +473,17 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
     let af = false;
     (async () => {
       try {
-        const vraag = ronde ? "" : "herscan=1&";
+        // Herscannen bij het openen van de pagina en wanneer zij erom vraagt;
+        // na een eigen actie volstaat gewoon ophalen.
+        const herscan = vorigeHerscan.current !== herscanRonde;
+        vorigeHerscan.current = herscanRonde;
+        const vraag = herscan ? "herscan=1&" : "";
         const res = await fetch(`${VOORSTELLEN_API}?${vraag}t=${Date.now()}`, { headers: { "X-Beheer-Code": code() }, cache: "no-store" });
+        if (res.status === 401 || res.status === 429) {
+          // Herladen helpt dan niet: ze moet opnieuw inloggen.
+          if (!af) setLaadfout("De beheercode werd geweigerd. Vergrendel de pagina en meld u opnieuw aan.");
+          return;
+        }
         if (!res.ok) throw new Error(res.status);
         const data = await res.json();
         if (af) return;
@@ -408,6 +493,11 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
         const bij = nieuw.filter((v) => !gezien.current.has(v.id));
         nieuw.forEach((v) => gezien.current.add(v.id));
         if (ronde && bij.length && onNieuw) onNieuw(bij.length);
+        // Na een tik op "Berichten nu nalezen" hoort er een antwoord te komen,
+        // ook als er niets nieuws is.
+        if (herscanRonde && herscan) setMelding(bij.length
+          ? `De berichten zijn nagelezen: ${bij.length === 1 ? "er is één nieuwe melding" : `er zijn ${bij.length} nieuwe meldingen`} hieronder.`
+          : "De berichten zijn nagelezen. Er is niets nieuws.");
       } catch (e) {
         // Stil mislukken is erger dan een regel tekst: dan denkt ze dat er
         // gewoon geen voorstel is.
@@ -415,7 +505,7 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
       }
     })();
     return () => { af = true; };
-  }, [ronde]);
+  }, [ronde, herscanRonde, vernieuw]);
 
   const doe = async (v, actie) => {
     setBezig(v.id);
@@ -441,12 +531,22 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
       if (!res.ok) throw new Error("niet bewaard");
       weg = true;
       setList((l) => l.filter((x) => x.id !== v.id));
-      if (actie === "toevoegen") {
+      if (actie === "terugdraaien") {
+        setMelding(isOpen(v)
+          ? "Teruggedraaid. Die feestdag telt weer als sluitingsdag."
+          : "Teruggedraaid. De sluiting staat niet meer op de website.");
+        // De telefoon stond volgens de melding net ingesteld; die instelling
+        // moet nu weer terug.
+        setVoys({ soort: isOpen(v) ? "terug" : "sluiting-terug", periode: { from: v.from, to: v.to }, dagen: isOpen(v) ? v.dagen : [] });
+        fetchClosures();
+      } else if (actie === "weg") {
+        setMelding("Melding weggeklikt. De sluiting blijft op de website staan.");
+      } else if (actie === "toevoegen") {
         const dubbel = !!(data && data.dubbel);
         if (isOpen(v)) {
           setMelding(dubbel
             ? "Die dag stond al als open."
-            : closureOp(v.from)
+            : !openDagenZonderSluiting(v).length
               // Haar eigen sluiting gaat voor: op de website verandert er niets.
               ? "Genoteerd. Zolang uw sluitingsperiode over die dag loopt, blijft de website gesloten tonen."
               : "Feestdag aangepast. De apotheek staat die dag nu als open op de website.");
@@ -466,6 +566,7 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
       // De gedrukte knop verdwijnt uit de pagina: focus naar het kader, dat nu
       // de melding draagt, in plaats van terug naar de bovenkant van de pagina.
       if (weg && kader.current) kader.current.focus();
+      setVernieuw((v) => v + 1);
     }
   };
 
@@ -474,20 +575,36 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
   return (
     <div className="voorstellen" id={VOORSTELLEN_ID} ref={kader} tabIndex={-1} aria-live="polite">
       {list.map((v) => (
-        <aside className={`voorstel ${isOpen(v) ? "voorstel-open" : ""}`} key={v.id} aria-label={`${isOpen(v) ? "Voorgestelde open dag" : "Voorgestelde sluiting"} ${periodeKort(v)}`}>
+        <aside className={`voorstel ${isOpen(v) ? "voorstel-open" : ""} ${v.toegepast ? "voorstel-gedaan" : ""}`} key={v.id} aria-label={`${v.toegepast ? "Automatisch overgenomen" : "Voorgestelde"} ${isOpen(v) ? "open dag" : "sluiting"} ${periodeKort(v)}`}>
           <div>
-            <span className="mono">{isOpen(v) ? "Voorstel · feestdag toch open" : "Voorstel · gelezen uit een bericht"}</span>
+            <span className="mono">
+              {v.toegepast
+                ? (isOpen(v) ? "Automatisch overgenomen · feestdag toch open" : "Automatisch overgenomen uit een bericht")
+                : (isOpen(v) ? "Voorstel · feestdag toch open" : "Voorstel · gelezen uit een bericht")}
+            </span>
             <p className="voorstel-bron">{bronRegel(v)} {v.berichtTitel ? <strong>{v.berichtTitel}</strong> : <em>bericht zonder titel</em>}</p>
-            <h2>{periodeZin(v)}</h2>
+            <h2>{periodeZin(toonWaarden(v, closures))}{v.toegepast && !isOpen(v) && toonWaarden(v, closures).reason ? ` · ${toonWaarden(v, closures).reason}` : ""}</h2>
             <p className="voorstel-uitleg">
-              {!isOpen(v)
-                ? "Dit staat nog niet op de website. Toevoegen zet de sluiting meteen online."
-                : closureOp(v.from)
-                  // Haar eigen sluiting gaat voor: dan verandert er niets op de site.
-                  ? "U hebt zelf een sluitingsperiode over die dag. Die gaat voor, dus de website blijft die dag gesloten tonen — ook na Toevoegen."
-                  : "De website toont die dag nu nog Gesloten, omdat het een feestdag is. Toevoegen laat de gewone uren gelden. Een sluitingsperiode die u zelf ingaf blijft wel voorgaan."}
+              {v.toegepast && staatVanMelding(v, closures).stand === "weg"
+                ? "Deze sluiting staat niet meer op de website — u hebt ze zelf verwijderd of vervangen."
+                : v.toegepast && staatVanMelding(v, closures).stand === "gewijzigd"
+                  ? "U hebt deze sluiting intussen zelf aangepast. Wat hieronder staat, is wat er nu op de website staat."
+                  : v.toegepast
+                ? (v.nuZichtbaar
+                  // Loopt ze nu of begint ze binnen een dag, dan ziet een klant
+                  // het al. Dat hoort ze te weten, niet pas later te ontdekken.
+                  ? "Dit staat nu al op de website — klanten zien het dus al. Klopt het niet, tik dan Terugdraaien."
+                  : isOpen(v)
+                    ? "Dit staat al op de website. Klopt het niet, tik dan Terugdraaien."
+                    : "Dit staat al op de website. Klopt het niet, tik dan Terugdraaien; wilt u de datums of de reden bijwerken, tik dan Aanpassen.")
+                : !isOpen(v)
+                  ? "Dit staat nog niet op de website. Toevoegen zet de sluiting meteen online."
+                  : !openDagenZonderSluiting(v).length
+                    // Haar eigen sluiting gaat voor: dan verandert er niets op de site.
+                    ? "U hebt zelf een sluitingsperiode over die dag. Die gaat voor, dus de website blijft die dag gesloten tonen — ook na Toevoegen."
+                    : "De website toont die dag nu nog Gesloten, omdat het een feestdag is. Toevoegen laat de gewone uren gelden. Een sluitingsperiode die u zelf ingaf blijft wel voorgaan."}
             </p>
-            {isOpen(v) ? null : (
+            {isOpen(v) || v.toegepast ? null : (
               <label className="bh-field voorstel-reden">
                 <span>Reden (zichtbaar op de website)</span>
                 <input
@@ -499,20 +616,43 @@ const Sluitingsvoorstellen = ({ ronde, onNieuw, onToegevoegd }) => {
                 />
               </label>
             )}
+            {!v.toegepast && v.waarom ? <p className="voorstel-waarom">Niet vanzelf overgenomen: {v.waarom}.</p> : null}
+            {v.toegepast && staatVanMelding(v, closures).stand !== "weg" ? <VoysRegel v={toonWaarden(v, closures)} /> : null}
             {fout.id === v.id ? <p className="field-error" role="alert">{fout.tekst}</p> : null}
           </div>
           <div className="voorstel-acties">
-            <button type="button" className="btn btn-primary" disabled={bezig === v.id} onClick={() => doe(v, "toevoegen")}>
-              {bezig === v.id ? "Bezig…" : "Toevoegen"}<span className="sr-only"> — {periodeKort(v)}</span><span className="arr" aria-hidden="true"></span>
-            </button>
-            <button type="button" className="btn btn-ghost" disabled={bezig === v.id} onClick={() => doe(v, "negeren")}>
-              Negeren<span className="sr-only"> — {periodeKort(v)}</span>
-            </button>
+            {v.toegepast ? (
+              <>
+                {staatVanMelding(v, closures).stand === "weg" ? null : (
+                  <button type="button" className="btn btn-ghost" disabled={bezig === v.id} onClick={() => doe(v, "terugdraaien")}>
+                    {bezig === v.id ? "Bezig…" : "Terugdraaien"}<span className="sr-only"> — {periodeKort(v)}</span>
+                  </button>
+                )}
+                {isOpen(v) || staatVanMelding(v, closures).stand === "weg" ? null : (
+                  <button type="button" className="btn btn-ghost" disabled={bezig === v.id} onClick={() => onAanpassen && onAanpassen(toonWaarden(v, closures))}>
+                    Aanpassen<span className="sr-only"> — {periodeKort(v)}</span>
+                  </button>
+                )}
+                <button type="button" className="bh-lock" disabled={bezig === v.id} onClick={() => doe(v, "weg")}>
+                  Gezien<span className="sr-only"> — {periodeKort(v)}</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn-primary" disabled={bezig === v.id} onClick={() => doe(v, "toevoegen")}>
+                  {bezig === v.id ? "Bezig…" : "Toevoegen"}<span className="sr-only"> — {periodeKort(v)}</span><span className="arr" aria-hidden="true"></span>
+                </button>
+                <button type="button" className="btn btn-ghost" disabled={bezig === v.id} onClick={() => doe(v, "negeren")}>
+                  Negeren<span className="sr-only"> — {periodeKort(v)}</span>
+                </button>
+              </>
+            )}
           </div>
         </aside>
       ))}
       {laadfout ? <p className="voorstel-melding err">{laadfout}</p> : null}
       {melding ? <p className="voorstel-melding">{melding}</p> : null}
+      {voys ? <VoysHerinnering {...voys} onSluit={() => setVoys(null)} /> : null}
     </div>
   );
 };
@@ -533,6 +673,9 @@ const FeestdagenOpen = ({ onKlaar }) => {
   const [bezig, setBezig] = React.useState("");
   const [fout, setFout] = React.useState("");
   const [melding, setMelding] = React.useState("");
+  // De herinnering voor de telefoon hoort hier te staan: de knop staat
+  // onderaan de pagina, en bovenaan ziet ze ze niet.
+  const [voys, setVoys] = React.useState(null);
   const kader = React.useRef(null);
 
   const terug = async (dag) => {
@@ -554,9 +697,13 @@ const FeestdagenOpen = ({ onKlaar }) => {
         return;
       }
       if (!res.ok) throw new Error("niet bewaard");
+      const eigenSluiting = !!closureOp(dag);
       await fetchClosures();
       setMelding(`${naamVan(dag)} ${fmtDate(dag)} is weer een gewone sluitingsdag.`);
-      if (onKlaar) onKlaar((data && data.melding) || "De feestdag geldt weer.", dag);
+      // Stond de doorschakeling nooit uit (omdat haar eigen sluiting voorging),
+      // dan hoeft ze ook niets weer aan te zetten.
+      if (!eigenSluiting) setVoys({ periode: { from: dag, to: dag }, dagen: [dag] });
+      if (onKlaar) onKlaar((data && data.melding) || "De feestdag geldt weer.");
     } catch (e) {
       setFout(foutTekst(res && res.status ? res : null, data));
     } finally {
@@ -574,7 +721,7 @@ const FeestdagenOpen = ({ onKlaar }) => {
         <>
           <h3>Feestdagen waarop u toch open bent</h3>
           <p className="bh-feestdagen-lede">
-            Gelezen uit een nieuwsbericht en door u bevestigd. De website toont op die dagen gewoon de openingsuren.
+            Gelezen uit een nieuwsbericht. De website toont op die dagen gewoon de openingsuren — behalve waar u zelf een sluitingsperiode hebt staan.
           </p>
         </>
       ) : null}
@@ -595,6 +742,7 @@ const FeestdagenOpen = ({ onKlaar }) => {
         })}
       </ul>
       {melding ? <p className="voorstel-melding">{melding}</p> : null}
+      {voys ? <VoysHerinnering {...voys} soort="terug" onSluit={() => setVoys(null)} /> : null}
       {fout ? <p className="field-error" role="alert">{fout}</p> : null}
     </div>
   );
@@ -738,7 +886,7 @@ const BeheerBerichten = ({ wijzer, onGeplaatst }) => {
           </div>
           {wijzer ? (
             <p className="bh-wijzer" role="status">
-              {wijzer} <a className="inline" href={`#${VOORSTELLEN_ID}`}>Naar het voorstel</a>
+              {wijzer} <a className="inline" href={`#${VOORSTELLEN_ID}`}>Naar het bericht bovenaan</a>
             </p>
           ) : null}
         </form>
