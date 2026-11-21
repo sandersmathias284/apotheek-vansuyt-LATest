@@ -21,8 +21,8 @@ Lettertypen: Source Serif 4 (serif, cursieve accenten) + Geist (sans) + Geist Mo
 **Sluitingsperiodes / vakantie** — `/beheer/`. De code wordt enkel op de server gecontroleerd (`/api/login`): env-variabele `BEHEER_CODE` op Netlify, zonder die variabele kan niemand bewaren. De app "Post maken" gebruikt dezelfde waarde als `WEBSITE_CODE`. Periodes worden centraal bewaard via `/api/closures` (Netlify Blobs) en zijn wereldwijd zichtbaar. Tijdens een periode: rode balk op elke pagina, aftelklok op de onthaalpagina, link naar de officiële wachtdienst. Periodes binnen 30 dagen worden vooraf aangekondigd. localStorage dient enkel als cache.
 
 **Vaccinatieagenda** (Catalog.jsx): de site bewaart zelf niets meer. Data komen van de tablet-app van de eigenaar via `VACC_API` / `fetchVacc`; de site toont ze alleen. "Plaats reserveren" opent de externe boekingspagina:
-- Covid → https://apotheekformulier.netlify.app/boeken.html?vaccin=covid
-- Griep → https://apotheekformulier.netlify.app/boeken.html?vaccin=griep
+- Covid → https://apotheekformulier.netlify.app/boeken.html?apotheek=vansuyt&vaccin=covid
+- Griep → https://apotheekformulier.netlify.app/boeken.html?apotheek=vansuyt&vaccin=griep
 Covid: vaste dagen, afspraak noodzakelijk. Griep: op zaterdag, andere dagen mits afspraak. Teksten over terugbetaling, bijwerkingen en misvattingen staan onder de griepkaart (aangeleverd door de eigenaar — niet herschrijven).
 
 **Wachtdienst**: officieel portaal https://www.apotheek.be/pharmacysearch + 0903 99 000, huisarts van wacht 1733, spoed 112. De eigen "wachtwijzer" (apotheekvanwacht.netlify.app) is bewust van de site gehaald — die wil de eigenaar commercialiseren; nooit opnieuw toevoegen.

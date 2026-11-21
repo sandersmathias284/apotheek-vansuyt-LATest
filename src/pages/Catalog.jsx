@@ -127,7 +127,7 @@ const VACC_CAMPAIGNS = [
 // Vaccinatiedagen komen rechtstreeks uit de online agenda van de apotheek:
 // Sabine duidt ze aan op de tablet (Beheer > Vaccinatiedagen). Vrije uren en
 // volzette dagen volgen vanzelf uit de boekingen.
-const VACC_API = "https://apotheekformulier.netlify.app/.netlify/functions/boeken?actie=dagen";
+const VACC_API = "https://apotheekformulier.netlify.app/.netlify/functions/boeken?actie=dagen&apotheek=vansuyt";
 const readVacc = () => { try { return JSON.parse(localStorage.getItem(VACC_STORE_KEY)) || {}; } catch { return {}; } };
 const cacheVacc = (next) => {
   try { localStorage.setItem(VACC_STORE_KEY, JSON.stringify(next)); } catch {}
@@ -205,7 +205,7 @@ const BoekVenster = ({ vaccin, onClose }) => {
           </div>
           <button type="button" className="drawer-close" onClick={onClose} aria-label="Venster sluiten">×</button>
         </div>
-        <iframe className="boek-frame" src={`https://apotheekformulier.netlify.app/boeken.html?embed=1&vaccin=${vaccin}`} title="Vaccinatie reserveren"></iframe>
+        <iframe className="boek-frame" src={`https://apotheekformulier.netlify.app/boeken.html?apotheek=vansuyt&embed=1&vaccin=${vaccin}`} title="Vaccinatie reserveren"></iframe>
       </div>
       <style>{`
         .boek-scrim { position: fixed; inset: 0; z-index: 200; background: rgba(36,28,24,.55); display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -386,7 +386,7 @@ const VaccinatieAgenda = ({ beheer = false, onSave }) => {
 
                 {!beheer && (
                   <div className="vacc-actions">
-                    <a className="btn btn-primary" href={`https://apotheekformulier.netlify.app/boeken.html?vaccin=${c.id}`} target="_blank" rel="noreferrer"
+                    <a className="btn btn-primary" href={`https://apotheekformulier.netlify.app/boeken.html?apotheek=vansuyt&vaccin=${c.id}`} target="_blank" rel="noreferrer"
                       onClick={(e) => { e.preventDefault(); setBoekVaccin(c.id); }}>
                       Plaats reserveren<span className="arr" aria-hidden="true"></span>
                     </a>
